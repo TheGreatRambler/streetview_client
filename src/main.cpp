@@ -1,3 +1,5 @@
+#define RAPIDJSON_HAS_STDSTRING 1
+
 #include <codec/SkCodec.h>
 #include <core/SkBitmap.h>
 #include <core/SkCanvas.h>
@@ -12,12 +14,18 @@
 #include <curl/curl.h>
 #include <encode/SkPngEncoder.h>
 #include <fmt/format.h>
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/reader.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
                                     void *userp) {
@@ -25,6 +33,40 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
   auto &mem = *static_cast<std::string *>(userp);
   mem.append(static_cast<char *>(contents), realsize);
   return realsize;
+}
+
+constexpr int SCREEN_PIXEL_HEIGHT = 768;
+constexpr double PI = 3.14159;
+constexpr double MinLatitude = -85.05112878;
+constexpr double MaxLatitude = 85.05112878;
+constexpr double MinLongitude = -180;
+constexpr double MaxLongitude = 180;
+
+double altitude_from_zoom_and_latitude(double zoom, double latitude) {
+  constexpr int EARTH_RADIUS_IN_METERS = 6371010;
+  constexpr int TILE_SIZE = 256;
+  constexpr double RADIUS_X_PIXEL_HEIGHT =
+      27.3611 * EARTH_RADIUS_IN_METERS * SCREEN_PIXEL_HEIGHT;
+  return (RADIUS_X_PIXEL_HEIGHT * cos((latitude * PI) / 180)) /
+         (pow(2, zoom) * TILE_SIZE);
+}
+
+double clip_number(double n, double minValue, double maxValue) {
+  return std::min(std::max(n, minValue), maxValue);
+}
+
+std::pair<int, int> lat_long_to_x_y(double latitude, double longitude,
+                                    int zoom) {
+  latitude = clip_number(latitude, MinLatitude, MaxLatitude);
+  longitude = clip_number(longitude, MinLongitude, MaxLongitude);
+
+  double x = (longitude + 180) / 360;
+  double sinLatitude = sin(latitude * PI / 180);
+  double y = 0.5 - log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * PI);
+
+  uint mapSize = 2 << (zoom - 1);
+  return std::make_pair((int)clip_number(x * mapSize + 0.5, 0, mapSize - 1),
+                        (int)clip_number(y * mapSize + 0.5, 0, mapSize - 1));
 }
 
 std::string download_from_url(std::string url, CURL *curl_handle, CURLcode *res,
@@ -48,16 +90,22 @@ std::string download_from_url(std::string url, CURL *curl_handle, CURLcode *res,
   *res = curl_easy_perform(curl_handle);
 
   if (*res != CURLE_OK) {
-    std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(*res)
+    std::cerr << "Downloading failed: " << curl_easy_strerror(*res)
               << std::endl;
-  } else {
-    std::cout << download.size() << " bytes retrieved" << std::endl;
   }
 
   return download;
 }
 
 int main(void) {
+  auto lat = 52.369306;
+  auto lng = 4.896063;
+  auto range = 10000;
+  auto num_previews = 100;
+  auto streetview_zoom = 1;
+  // auto z = altitude_from_zoom_and_latitude(zoom, lat);
+  // std::cout << z << std::endl;
+
   curl_global_init(CURL_GLOBAL_ALL);
   auto curl_handle = curl_easy_init();
 
@@ -108,33 +156,60 @@ int main(void) {
                         main_page_download.begin() + end_quote);
   std::cout << "Obtained id: " << id << std::endl;
 
+  /*
+    // Get x y coordinates
+    auto x_y = lat_long_to_x_y(lat, lng, zoom);
+    std::cout << x_y.first << " " << x_y.second << " " << zoom << std::endl;
+
+    int x = x_y.first;
+    int y = x_y.second;
+    int unk1 = 4;
+    int flag = 65535;
+    auto streetview_lines_url = fmt::format(
+        "https://www.google.com/maps/vt/stream/"
+        "pb=!1m7!8m6!1m3!1i{}!2i{}!3i{}!2i{}!3x{}!2m3!1e0!2sm!3i640338396!2m2!"
+        "1e2!2sspotlit!2m8!1e2!2ssvv!4m2!1scc!2s*211m3*211e2*212b1*213e2*211m3*"
+        "211e10*212b1*213e2*211m3*211e9*212b1*213e2*211m3*211e10*212b1*213e2*"
+        "212b1*214b1!4m2!1ssvl!2s*211b1*212b1!3m8!2sen!3sus!5e1105!12m4!1e68!2m2!"
+        "1sset!2sRoadmap!4e1!5m4!1e4!8m2!1e0!1e1!6m16!1e12!2i2!11e2!19m1!1e0!"
+        "20m2!1e1!2e0!30m1!1f2!39b1!44e1!50e0!67m1!1e1!71b1!23i10203575!"
+        "23i1381033!23i1368782!23i1368785!23i47025228!23i4592408!23i4640515!"
+        "23i4897086!23i1375050!23i4536287!23i47054629!27m14!299174093m13!14m12!"
+        "1m8!1m2!1y0!2y3072202684587203839!2s%2Ffake_latlng_mid!4m2!1x520986111!"
+        "2x51265278!8b1!2b0!3b0!4b0!28i640&authuser=0",
+        zoom, x, y, unk1, flag);
+    std::cout << streetview_lines_url << std::endl;
+    auto streetview_lines =
+        download_from_url(streetview_lines_url, curl_handle, &res, NULL);
+
+    if (streetview_lines.at(6) == 0) {
+      // There are no lines
+    } else {
+    }
+    */
+
+  // https://www.google.com/maps/preview/photo?authuser=0&hl=en&gl=us&pb=!1e3!5m54!2m2!1i203!2i100!3m3!2i4!3sCAEIBAgFCAYgAQ!5b1!7m42!1m3!1e1!2b0!3e3!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e9!2b1!3e2!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e4!2b1!4b1!8m0!9b0!11m1!4b1!6m3!1sChQjZNPeL7aH0PEP4eKbkAE!7e81!15i11021!9m2!2d5.139826079358205!3d47.8029739538609!10d2965.159912287723
+
   auto photo_preview_url = fmt::format(
       "https://www.google.com/maps/preview/"
-      "photo?authuser=0&hl=en&gl=us&pb=!1e3!5m54!2m2!1i203!2i100!3m3!2i4!"
-      "3s{}!5b1!7m42!1m3!1e1!2b0!3e3!1m3!1e2!2b1!3e2!1m3!1e2!2b0!"
-      "3e3!1m3!1e8!2b0!3e3!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e9!2b1!3e2!"
-      "1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e4!2b1!4b1!8m0!9b0!11m1!"
-      "4b1!6m3!1s{}!7e81!15i11021!9m2!2d{}!3d{}!10d{}",
-      "CAEIBAgFCAYgAQ", id, 5.108114, 52.094514, 25);
+      "photo?authuser=0&hl=en&gl=us&pb=!1e3!5m54!2m2!1i203!2i100!3m3!2i{}!"
+      "3s{}!5b1!7m42!1m3!1e1!2b0!3e3!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e8!"
+      "2b0!3e3!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e9!2b1!3e2!1m3!1e10!2b0!"
+      "3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e4!2b1!4b1!8m0!9b0!11m1!4b1!6m3!1s{}"
+      "!"
+      "7e81!15i11021!9m2!2d{}!3d{}!10d{}",
+      num_previews, "CAEIBAgFCAYgAQ", id, lng, lat, range);
   // Format is longitude, latitude, zoom. Zoom stays the same
   // Accuracy must be between 5 and 6 decimals
 
   auto photo_preview_download =
       download_from_url(photo_preview_url, curl_handle, &res, NULL);
 
-  if (photo_preview_download.at(6) == 'n') {
-    std::cerr << "No street view exists at this location" << std::endl;
-    return 0;
-  }
+  // Parse into JSON
+  rapidjson::Document preview_document;
+  preview_document.Parse(photo_preview_download.substr(4));
 
-  end_quote = photo_preview_download.find("\"", 9);
-  if (end_quote == std::string::npos) {
-    std::cerr << "End quote not found" << std::endl;
-  }
-  auto tile_id = std::string(photo_preview_download.begin() + 9,
-                             photo_preview_download.begin() + end_quote);
-
-  std::cout << "Tile id: " << tile_id << std::endl;
+  std::cout << photo_preview_url << std::endl;
 
   curl_slist *tile_headers = NULL;
   tile_headers = curl_slist_append(
@@ -161,51 +236,153 @@ int main(void) {
       tile_headers, "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; "
                     "rv:109.0) Gecko/20100101 Firefox/111.0");
 
-  sk_sp<SkSurface> tile_surface =
-      SkSurface::MakeRasterN32Premul(512 * 8, 512 * 4);
+  curl_slist *photometa_headers = NULL;
+  photometa_headers = curl_slist_append(photometa_headers, "Accept: */*");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Accept-Encoding: en-US,en;q=0.5");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Accept-Language: en-US,en;q=0.5");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Connection: keep-alive");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Host: www.google.com");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Referer: https://www.google.com/");
+  // TODO switch to cors
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Sec-Fetch-Dest: document");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Sec-Fetch-Mode: navigate");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Sec-Fetch-Site: none");
+  photometa_headers =
+      curl_slist_append(photometa_headers, "Sec-Fetch-User: ?1");
+  photometa_headers = curl_slist_append(photometa_headers, "TE: trailers");
+  photometa_headers = curl_slist_append(
+      photometa_headers,
+      "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; "
+      "rv:109.0) Gecko/20100101 Firefox/111.0");
 
-  for (int y = 0; y < 4; y++) {
-    for (int x = 0; x < 8; x++) {
-      auto tile_url =
-          fmt::format("https://streetviewpixels-pa.googleapis.com/v1/"
-                      "tile?cb_client=maps_sv.tactile&panoid={}&x={}&y={}&zoom="
-                      "3&nbt=1&fover=2",
-                      tile_id, x, y);
-      auto tile_download =
-          download_from_url(tile_url, curl_handle, &res, tile_headers);
+  if (preview_document.IsArray() && preview_document.Size() == 11) {
+    if (preview_document[0].IsArray() && preview_document[0].Size() > 0) {
+      std::cout << preview_document[0].Size() << " previews" << std::endl;
+      for (auto &preview : preview_document[0].GetArray()) {
+        if (preview.IsArray() && preview.Size() == 32) {
+          if (preview[0].IsString()) {
+            auto tile_id = std::string(preview[0].GetString(),
+                                       preview[0].GetStringLength());
+            std::cout << "Tile id: " << tile_id << std::endl;
 
-      SkBitmap bitmap;
-      std::unique_ptr<SkCodec> jpeg = SkCodec::MakeFromData(
-          SkData::MakeWithCopy(tile_download.data(), tile_download.size()));
-      if (!jpeg) {
-        std::cerr << "Could not get from jpeg" << std::endl;
+            if (tile_id.size() != 22) {
+              std::cout << "Fake street view, ignore" << std::endl;
+              continue;
+            }
+
+            // Get photometa
+            auto photometa_url = fmt::format(
+                "https://www.google.com/maps/photometa/"
+                "v1?authuser=0&hl=en&gl=us&pb=!1m4!1smaps_sv.tactile!11m2!2m1!"
+                "1b1!2m2!1sen!2sus!3m3!1m2!1e2!2s{}!4m57!1e1!1e2!1e3!1e4!1e5!"
+                "1e6!1e8!1e12!2m1!1e1!4m1!1i48!5m1!1e1!5m1!1e2!6m1!1e1!6m1!1e2!"
+                "9m36!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!1e3!2b1!3e2!1m3!1e3!"
+                "2b0!3e3!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!"
+                "1e10!2b1!3e2!1m3!1e10!2b0!3e3",
+                tile_id);
+            auto photometa_download = download_from_url(
+                photometa_url, curl_handle, &res, photometa_headers);
+            rapidjson::Document photometa_document;
+            photometa_document.Parse(photometa_download.substr(4));
+
+            auto &tiles_dimensions = photometa_document[1][0][2][2];
+            double tiles_height = tiles_dimensions[0].GetInt() / 512 /
+                                  pow(2, 5 - streetview_zoom);
+            double tiles_width = tiles_dimensions[1].GetInt() / 512 /
+                                 pow(2, 5 - streetview_zoom);
+            std::cout << "Using width " << tiles_width << " and height "
+                      << tiles_height << std::endl;
+
+            sk_sp<SkSurface> tile_surface = SkSurface::MakeRasterN32Premul(
+                tiles_width * 512, tiles_height * 512);
+
+            // rapidjson::StringBuffer buffer;
+            // rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+            // photometa_document[1][0][2][2].Accept(writer);
+            // const char *json = buffer.GetString();
+            // std::cout << "thing: " << json << std::endl;
+
+            // Start processing
+            tile_surface->getCanvas()->clear(SK_ColorWHITE);
+            for (int y = 0; y < tiles_height; y++) {
+              for (int x = 0; x < tiles_width; x++) {
+                auto tile_url =
+                    fmt::format("https://streetviewpixels-pa.googleapis.com/v1/"
+                                "tile?cb_client=maps_sv.tactile&panoid={}&x={}&"
+                                "y={}&zoom={}&nbt=1&fover=2",
+                                tile_id, x, y, streetview_zoom);
+                auto tile_download = download_from_url(tile_url, curl_handle,
+                                                       &res, tile_headers);
+
+                if (res == CURLE_OK) {
+                  long http_code = 0;
+                  curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE,
+                                    &http_code);
+                  if (http_code == 200) {
+                    SkBitmap bitmap;
+                    std::unique_ptr<SkCodec> jpeg =
+                        SkCodec::MakeFromData(SkData::MakeWithCopy(
+                            tile_download.data(), tile_download.size()));
+                    if (!jpeg) {
+                      std::cerr << "Could not get image from jpeg data: "
+                                << tile_download << std::endl;
+                    }
+                    SkImageInfo info =
+                        jpeg->getInfo().makeColorType(kBGRA_8888_SkColorType);
+                    bitmap.allocPixels(info);
+                    jpeg->getPixels(info, bitmap.getPixels(),
+                                    bitmap.rowBytes());
+                    bitmap.setImmutable();
+
+                    tile_surface->getCanvas()->drawImage(bitmap.asImage(),
+                                                         512 * x, 512 * y);
+                  } else {
+                    std::cout << "Error code " << http_code << std::endl;
+                  }
+                }
+              }
+            }
+
+            std::filesystem::create_directory("tiles");
+            SkFILEWStream dest(
+                fmt::format("tiles/stitched-{}.png", tile_id).c_str());
+            SkPngEncoder::Options options;
+            options.fZLibLevel = 9;
+
+            SkBitmap bitmap;
+            bitmap.allocPixels(
+                SkImageInfo::Make(tile_surface->width(), tile_surface->height(),
+                                  SkColorType::kRGB_888x_SkColorType,
+                                  SkAlphaType::kOpaque_SkAlphaType),
+                0);
+
+            tile_surface->getCanvas()->readPixels(bitmap, 0, 0);
+            SkPixmap src;
+            bitmap.peekPixels(&src);
+            if (!SkPngEncoder::Encode(&dest, src, options)) {
+              std::cout << fmt::format("Could not render {}", tile_id)
+                        << std::endl;
+            }
+          } else {
+            std::cout << "Preview id is not a string" << std::endl;
+          }
+        } else {
+          std::cout << "Preview is not well formed" << std::endl;
+        }
       }
-      SkImageInfo info = jpeg->getInfo().makeColorType(kBGRA_8888_SkColorType);
-      bitmap.allocPixels(info);
-      jpeg->getPixels(info, bitmap.getPixels(), bitmap.rowBytes());
-      bitmap.setImmutable();
-
-      tile_surface->getCanvas()->drawImage(bitmap.asImage(), 512 * x, 512 * y);
+    } else {
+      std::cout << "No street view previews here" << std::endl;
     }
-  }
-
-  std::filesystem::create_directory("tiles");
-  SkFILEWStream dest("tiles/stiched.png");
-  SkPngEncoder::Options options;
-  options.fZLibLevel = 9;
-
-  SkBitmap bitmap;
-  bitmap.allocPixels(SkImageInfo::Make(tile_surface->width(),
-                                       tile_surface->height(),
-                                       SkColorType::kRGB_888x_SkColorType,
-                                       SkAlphaType::kOpaque_SkAlphaType),
-                     0);
-
-  tile_surface->getCanvas()->readPixels(bitmap, 0, 0);
-  SkPixmap src;
-  bitmap.peekPixels(&src);
-  if (!SkPngEncoder::Encode(&dest, src, options)) {
-    std::cout << "Could not render full image" << std::endl;
+  } else {
+    std::cout << "Is not well formed array" << std::endl;
   }
 
   curl_easy_cleanup(curl_handle);

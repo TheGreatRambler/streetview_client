@@ -4,11 +4,11 @@ project(streetview_client VERSION ${STREETVIEW_CLIENT_VERSION})
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_compile_options(-Wno-sign-compare)
-add_compile_options(-Wno-deprecated-declarations)
-add_compile_options(-Wno-unused-parameter)
-add_compile_options(-Wno-extern-initializer)
-add_compile_options(-Wno-deprecated-enum-enum-conversion)
+set(
+  CMAKE_CXX_FLAGS
+  "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-extern-initializer -Wno-deprecated-enum-enum-conversion"
+)
+
 
 if(CMAKE_BUILD_TYPE EQUAL "DEBUG")
 	add_link_options(-g -O0)
@@ -22,6 +22,13 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl ${CMAKE_CURRENT_BI
 
 # CLI11 for better command line support
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/CLI11 ${CMAKE_CURRENT_BINARY_DIR}/third_party/CLI11)
+
+# Rapidjson for some endpoints
+set(RAPIDJSON_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson/include)
+set(RAPIDJSON_BUILD_EXAMPLES OFF)
+set(RAPIDJSON_BUILD_TESTS OFF)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson ${CMAKE_CURRENT_BINARY_DIR}/third_party/rapidjson)
+string(REPLACE "-march=native" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
 # Skia for rendering fisheye
 set(SKIA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/skia)
@@ -57,5 +64,5 @@ set_target_properties(streetview_client PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-include_directories(streetview_client include fmt libcurl CLI11::CLI11 ${SKIA_DIR} ${SKIA_DIR}/include)
+include_directories(streetview_client include fmt libcurl CLI11::CLI11 ${SKIA_DIR} ${SKIA_DIR}/include ${RAPIDJSON_INCLUDE_DIR})
 target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11::CLI11 skia "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices")
