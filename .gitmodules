@@ -1,0 +1,12 @@
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt
+[submodule "third_party/curl"]
+	path = third_party/curl
+	url = https://github.com/curl/curl
+[submodule "third_party/CLI11"]
+	path = third_party/CLI11
+	url = https://github.com/CLIUtils/CLI11
+[submodule "third_party/skia"]
+	path = third_party/skia
+	url = https://github.com/google/skia
