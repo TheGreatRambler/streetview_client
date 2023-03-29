@@ -1,5 +1,8 @@
 #define RAPIDJSON_HAS_STDSTRING 1
 
+#include <CLI/App.hpp>
+#include <CLI/Config.hpp>
+#include <CLI/Formatter.hpp>
 #include <codec/SkCodec.h>
 #include <core/SkBitmap.h>
 #include <core/SkCanvas.h>
@@ -20,6 +23,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -97,14 +101,34 @@ std::string download_from_url(std::string url, CURL *curl_handle, CURLcode *res,
   return download;
 }
 
-int main(void) {
-  auto lat = 52.369306;
-  auto lng = 4.896063;
-  auto range = 10000;
-  auto num_previews = 100;
-  auto streetview_zoom = 1;
-  // auto z = altitude_from_zoom_and_latitude(zoom, lat);
-  // std::cout << z << std::endl;
+int main(int argc, char **argv) {
+  CLI::App app{"Street View custom client in C++"};
+  double lat;
+  app.add_option("--lat", lat, "Latitude")->required();
+  double lng;
+  app.add_option("--long", lng, "Longitude")->required();
+  int range = 10000;
+  app.add_option("-r,--range", range, "Range from location");
+  int num_previews = 100;
+  app.add_option("-n,--num-previews", num_previews, "Number of previews");
+  int streetview_zoom = 2;
+  app.add_option("-z,--zoom", streetview_zoom,
+                 "How much to zoom in street view images, higher numbers "
+                 "increase resolution");
+
+  CLI11_PARSE(app, argc, argv);
+  std::chrono::time_point<std::chrono::steady_clock> start;
+  std::chrono::time_point<std::chrono::steady_clock> stop;
+
+  start = std::chrono::high_resolution_clock::now();
+
+  // auto lat = 39.754555;
+  // auto lng = -105.221849;
+  // auto range = 100000;
+  // auto num_previews = 100;
+  // auto streetview_zoom = 1;
+  //  auto z = altitude_from_zoom_and_latitude(zoom, lat);
+  //  std::cout << z << std::endl;
 
   curl_global_init(CURL_GLOBAL_ALL);
   auto curl_handle = curl_easy_init();
@@ -142,19 +166,20 @@ int main(void) {
       "https://www.google.com/maps", curl_handle, &res, main_page_headers);
 
   auto find_str = "\"],null,0,\"";
-  auto start = main_page_download.find(find_str);
-  if (start == std::string::npos) {
+  auto start_id = main_page_download.find(find_str);
+  if (start_id == std::string::npos) {
     std::cerr << "Start not found" << std::endl;
   }
 
-  auto end_quote = main_page_download.find("\"", start + strlen(find_str));
+  auto end_quote = main_page_download.find("\"", start_id + strlen(find_str));
   if (end_quote == std::string::npos) {
     std::cerr << "End quote not found" << std::endl;
   }
 
-  auto id = std::string(main_page_download.begin() + start + strlen(find_str),
-                        main_page_download.begin() + end_quote);
-  std::cout << "Obtained id: " << id << std::endl;
+  auto id =
+      std::string(main_page_download.begin() + start_id + strlen(find_str),
+                  main_page_download.begin() + end_quote);
+  std::cout << "Client id: " << id << std::endl;
 
   /*
     // Get x y coordinates
@@ -209,7 +234,7 @@ int main(void) {
   rapidjson::Document preview_document;
   preview_document.Parse(photo_preview_download.substr(4));
 
-  std::cout << photo_preview_url << std::endl;
+  // std::cout << photo_preview_url << std::endl;
 
   curl_slist *tile_headers = NULL;
   tile_headers = curl_slist_append(
@@ -263,18 +288,25 @@ int main(void) {
       "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; "
       "rv:109.0) Gecko/20100101 Firefox/111.0");
 
+  stop = std::chrono::high_resolution_clock::now();
+  fmt::print("Setup took {}ms\n",
+             std::chrono::duration_cast<std::chrono::milliseconds>(stop - start)
+                 .count());
+
   if (preview_document.IsArray() && preview_document.Size() == 11) {
     if (preview_document[0].IsArray() && preview_document[0].Size() > 0) {
       std::cout << preview_document[0].Size() << " previews" << std::endl;
       for (auto &preview : preview_document[0].GetArray()) {
         if (preview.IsArray() && preview.Size() == 32) {
           if (preview[0].IsString()) {
+            start = std::chrono::high_resolution_clock::now();
             auto tile_id = std::string(preview[0].GetString(),
                                        preview[0].GetStringLength());
-            std::cout << "Tile id: " << tile_id << std::endl;
+            // std::cout << "Tile id: " << tile_id << std::endl;
 
             if (tile_id.size() != 22) {
-              std::cout << "Fake street view, ignore" << std::endl;
+              // std::cout << fmt::format("{} is not a street view", tile_id)
+              //           << std::endl;
               continue;
             }
 
@@ -293,22 +325,50 @@ int main(void) {
             rapidjson::Document photometa_document;
             photometa_document.Parse(photometa_download.substr(4));
 
+            std::string filename;
+            auto &outer_location = photometa_document[1][0][3];
+            if (outer_location.IsArray() && outer_location.Size() > 2 &&
+                outer_location[2].IsArray()) {
+              if (outer_location[2].Size() == 1) {
+                // No address, just city
+                filename = fmt::format("tiles/stitched-{}-{}.png", tile_id,
+                                       outer_location[2][0].GetString());
+              } else if (outer_location[2].Size() == 2) {
+                // Address and city
+                filename = fmt::format("tiles/stitched-{}-{}, {}.png", tile_id,
+                                       outer_location[2][0].GetString(),
+                                       outer_location[2][1].GetString());
+              }
+            } else {
+              filename = fmt::format("tiles/stitched-{}.png", tile_id);
+            }
+
+            auto &outer_adjacent = photometa_document[1][0][5];
+            if (outer_adjacent.IsArray() && outer_adjacent.Size() == 1 &&
+                outer_adjacent[0].IsArray() && outer_adjacent[0].Size() == 13 &&
+                outer_adjacent[0][3].IsArray() &&
+                outer_adjacent[0][3].Size() == 1 &&
+                outer_adjacent[0][3][0].IsArray()) {
+              // Confirmed the list exists
+              for (auto &adjacent : outer_adjacent[0][3][0].GetArray()) {
+                if (adjacent.IsArray() && adjacent.Size() == 3 &&
+                    adjacent[0].IsArray() && adjacent[0].Size() == 2) {
+                  auto adjacent_tile = adjacent[0][1].GetString();
+                  std::cout << "Adjacent: " << adjacent_tile << std::endl;
+                }
+              }
+            }
+
             auto &tiles_dimensions = photometa_document[1][0][2][2];
             double tiles_height = tiles_dimensions[0].GetInt() / 512 /
                                   pow(2, 5 - streetview_zoom);
             double tiles_width = tiles_dimensions[1].GetInt() / 512 /
                                  pow(2, 5 - streetview_zoom);
-            std::cout << "Using width " << tiles_width << " and height "
-                      << tiles_height << std::endl;
+            // std::cout << "Using width " << tiles_width << " and height "
+            //           << tiles_height << std::endl;
 
             sk_sp<SkSurface> tile_surface = SkSurface::MakeRasterN32Premul(
                 tiles_width * 512, tiles_height * 512);
-
-            // rapidjson::StringBuffer buffer;
-            // rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
-            // photometa_document[1][0][2][2].Accept(writer);
-            // const char *json = buffer.GetString();
-            // std::cout << "thing: " << json << std::endl;
 
             // Start processing
             tile_surface->getCanvas()->clear(SK_ColorWHITE);
@@ -352,8 +412,7 @@ int main(void) {
             }
 
             std::filesystem::create_directory("tiles");
-            SkFILEWStream dest(
-                fmt::format("tiles/stitched-{}.png", tile_id).c_str());
+            SkFILEWStream dest(filename.c_str());
             SkPngEncoder::Options options;
             options.fZLibLevel = 9;
 
@@ -371,6 +430,12 @@ int main(void) {
               std::cout << fmt::format("Could not render {}", tile_id)
                         << std::endl;
             }
+
+            stop = std::chrono::high_resolution_clock::now();
+            fmt::print("Downloading {} took {}ms\n", tile_id,
+                       std::chrono::duration_cast<std::chrono::milliseconds>(
+                           stop - start)
+                           .count());
           } else {
             std::cout << "Preview id is not a string" << std::endl;
           }

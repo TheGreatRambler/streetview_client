@@ -64,5 +64,5 @@ set_target_properties(streetview_client PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-include_directories(streetview_client include fmt libcurl CLI11::CLI11 ${SKIA_DIR} ${SKIA_DIR}/include ${RAPIDJSON_INCLUDE_DIR})
-target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11::CLI11 skia "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices")
+include_directories(streetview_client include fmt libcurl CLI11 ${SKIA_DIR} ${SKIA_DIR}/include ${RAPIDJSON_INCLUDE_DIR})
+target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11 skia "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices")
