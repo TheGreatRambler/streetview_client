@@ -3,12 +3,12 @@ set(STREETVIEW_CLIENT_VERSION "0.0.1")
 project(streetview_client VERSION ${STREETVIEW_CLIENT_VERSION})
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_PREFIX_PATH "/opt/homebrew")
 
 set(
   CMAKE_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-extern-initializer -Wno-deprecated-enum-enum-conversion"
 )
-
 
 if(CMAKE_BUILD_TYPE EQUAL "DEBUG")
 	add_link_options(-g -O0)
@@ -43,7 +43,7 @@ elseif(WIN32)
 else()
 	# MacOS
 	execute_process(
-		COMMAND bin/gn gen ${SKIA_BUILD_DIR} "--args=is_official_build=true skia_use_system_libjpeg_turbo=false skia_use_system_libwebp=false skia_use_system_expat=false skia_use_system_zlib=false skia_use_system_libpng=false skia_use_system_harfbuzz=false skia_use_system_icu=false"
+		COMMAND bin/gn gen ${SKIA_BUILD_DIR} "--args=target_cpu=\"arm64\" is_official_build=true skia_use_system_libjpeg_turbo=false skia_use_system_libwebp=false skia_use_system_expat=false skia_use_system_zlib=false skia_use_system_libpng=false skia_use_system_harfbuzz=false skia_use_system_icu=false skia_enable_gpu=true skia_use_gl=true"
 		WORKING_DIRECTORY ${SKIA_DIR})
 	add_library(skia STATIC IMPORTED)
 	set_property(TARGET skia PROPERTY
@@ -51,8 +51,32 @@ else()
 endif()
 execute_process(COMMAND ninja WORKING_DIRECTORY ${SKIA_BUILD_DIR})
 
+# LibUI for the renderer
+set(LIBUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libui)
+set(LIBUI_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/third_party/libui)
+file(MAKE_DIRECTORY ${LIBUI_BUILD_DIR})
+execute_process(
+	COMMAND meson setup . ${LIBUI_DIR}
+	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
+execute_process(
+	COMMAND meson configure -Ddefault_library=static
+	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
+execute_process( 
+	COMMAND meson compile
+	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
+add_library(libui STATIC IMPORTED)
+set_property(TARGET libui PROPERTY
+	IMPORTED_LOCATION ${LIBUI_BUILD_DIR}/meson-out/libui.a)
+
+# For OpenGL
+find_package(glfw3 3.3 REQUIRED)
+
 add_executable(streetview_client ${APPLICATION_TYPE}
 	src/main.cpp
+	src/parse.cpp
+	src/extract.cpp
+	src/equirectangular.cpp
+	src/renderer.cpp
 )
 
 set_target_properties(streetview_client PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -64,5 +88,5 @@ set_target_properties(streetview_client PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-include_directories(streetview_client include fmt libcurl CLI11 ${SKIA_DIR} ${SKIA_DIR}/include ${RAPIDJSON_INCLUDE_DIR})
-target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11 skia "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices")
+include_directories(streetview_client include fmt libcurl CLI11 glfw3 ${SKIA_DIR} ${SKIA_DIR}/include ${LIBUI_DIR} ${RAPIDJSON_INCLUDE_DIR})
+target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11 skia libui "-framework OpenGl" "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices" "-framework Cocoa" "-framework Metal" "-framework Foundation" "-framework QuartzCore" glfw)
