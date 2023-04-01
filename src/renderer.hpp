@@ -22,6 +22,21 @@ public:
 		return glfwWindowShouldClose(window);
 	}
 
+	struct glfw_events_s {
+		bool currently_dragging = false;
+		// The location you have started dragging in
+		double drag_start_x;
+		double drag_start_y;
+		// The initial drag location
+		double screen_offset_start_x;
+		double screen_offset_start_y;
+		double screen_offset_x;
+		double screen_offset_y;
+		// Zoom
+		double zoom = 5.0;
+	};
+	glfw_events_s glfw_events;
+
 private:
 	void RenderPanorama();
 
@@ -35,15 +50,4 @@ private:
 	int width;
 	int height;
 	int frame = 0;
-
-	GLint aspect_ratio_location;
-	GLint psi_location;
-	GLint theta_location;
-	GLint f_location;
-	GLint h_location;
-	GLint v_location;
-	GLint vo_location;
-	GLint rot_location;
-	GLint background_color_location;
-	GLint texture_location;
 };

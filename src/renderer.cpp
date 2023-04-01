@@ -35,6 +35,7 @@ void EquirectangularWindow::PrepareWindow() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_DOUBLEBUFFER, GL_TRUE);
 #endif
 
 	/* Create a windowed mode window and its OpenGL context */
@@ -47,8 +48,48 @@ void EquirectangularWindow::PrepareWindow() {
 
 	glfwGetFramebufferSize(window, &width, &height);
 
-	/* Make the window's context current */
+	glfwSetCursorPosCallback(
+		window, *[](GLFWwindow* window, double x, double y) {
+			EquirectangularWindow* renderer
+				= (EquirectangularWindow*)glfwGetWindowUserPointer(window);
+			if(glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_RELEASE) {
+				if(!renderer->glfw_events.currently_dragging) {
+					renderer->glfw_events.drag_start_x = x;
+					renderer->glfw_events.drag_start_y = y;
+					renderer->glfw_events.screen_offset_start_x
+						= renderer->glfw_events.screen_offset_x;
+					renderer->glfw_events.screen_offset_start_y
+						= renderer->glfw_events.screen_offset_y;
+					renderer->glfw_events.currently_dragging = true;
+				} else {
+					double shift_x = x - renderer->glfw_events.drag_start_x;
+					double shift_y = y - renderer->glfw_events.drag_start_y;
+					renderer->glfw_events.screen_offset_x
+						= renderer->glfw_events.screen_offset_start_x + shift_x;
+					renderer->glfw_events.screen_offset_y
+						= renderer->glfw_events.screen_offset_start_y - shift_y;
+				}
+			} else {
+				renderer->glfw_events.currently_dragging = false;
+			}
+		});
+	glfwSetScrollCallback(
+		window, *[](GLFWwindow* window, double x_offset, double y_offset) {
+			EquirectangularWindow* renderer
+				= (EquirectangularWindow*)glfwGetWindowUserPointer(window);
+			renderer->glfw_events.zoom += y_offset / 3.0;
+			if(renderer->glfw_events.zoom < 4.0) {
+				renderer->glfw_events.zoom = 4.0;
+			} else if(renderer->glfw_events.zoom > 15.0) {
+				renderer->glfw_events.zoom = 15.0;
+			}
+		});
+
+	// Make the window's context current
 	glfwMakeContextCurrent(window);
+
+	// Set the user pointer
+	glfwSetWindowUserPointer(window, this);
 
 	auto interface = GrGLMakeNativeInterface();
 	direct_context = GrDirectContext::MakeGL(interface);
@@ -78,7 +119,7 @@ void EquirectangularWindow::DrawFrame() {
 	RenderPanorama();
 	surface->getCanvas()->flush();
 	glfwSwapBuffers(window);
-	glfwWaitEvents();
+	glfwPollEvents();
 	frame++;
 }
 
@@ -88,15 +129,21 @@ void EquirectangularWindow::RenderPanorama() {
 		shader_builder->uniform("u_viewResolution")
 			= SkV2 { (float)surface->width(), (float)surface->height() };
 
-		// Set view resolution
-		float pitch = 3.14159;
-		shader_builder->uniform("u_pitch").set(&pitch, 1);
-		float yaw = (float)frame / 100;
-		shader_builder->uniform("u_yaw").set(&yaw, 1);
-		float fov_h = 1.6;
-		shader_builder->uniform("u_fovH").set(&fov_h, 1);
-		float fov_v = 1.04;
+		// Set mouse location from drag
+		shader_builder->uniform("u_mouse")
+			= SkV2 { (float)glfw_events.screen_offset_x, (float)glfw_events.screen_offset_y };
+
+		// Correct FOV formula
+		// Vertical FOV = Initial FOV / Zoom
+		// Horizontal FOV = 2 * arctan(tan(Vertical FOV / 2) * Aspect Ratio)
+		double fov  = 180 / std::pow(2, glfw_events.zoom);
+		double zoom = glfw_events.zoom;
+
+		float fov_v = fov / zoom;
 		shader_builder->uniform("u_fovV").set(&fov_v, 1);
+		float fov_h
+			= 2 * std::atan(std::tan(fov_v / 2) * (float)surface->width() / surface->height());
+		shader_builder->uniform("u_fovH").set(&fov_h, 1);
 
 		SkPaint shader_paint;
 		shader_paint.setShader(shader_builder->makeShader());
@@ -112,9 +159,10 @@ uniform shader image;
 
 uniform vec2 u_imageResolution;
 uniform vec2 u_viewResolution;
+uniform vec2 u_mouse;
 
-uniform float u_pitch;
-uniform float u_yaw;
+//uniform float u_pitch;
+//uniform float u_yaw;
 uniform float u_fovH;
 uniform float u_fovV;
 
@@ -131,14 +179,16 @@ vec3 rotateXY(vec3 p, vec2 angle) {
 
 float4 main(float2 fragCoord) {
 	//place 0,0 in center from -1 to 1 ndc
-    vec2 uv = fragCoord.xy * 2./u_viewResolution.xy - 1.;
+    vec2 uv = fragCoord * 2.0 / u_viewResolution - 1.0;
 	
     //to spherical
-    vec3 camDir = normalize(vec3(uv.xy * vec2(tan(0.5 * u_fovH), tan(0.5 * u_fovV)), 1.0));
+    vec3 camDir = normalize(vec3(uv * vec2(tan(0.5 * u_fovH), tan(0.5 * u_fovV)), 1.0));
     
     //camRot is angle vec in rad
-    //vec3 camRot = vec3( ((iMouse.xy / iResolution.xy) - 0.5) * vec2(2.0 * PI,  PI), 0.);
-	vec3 camRot = vec3(u_yaw, u_pitch, 0.0);
+	vec2 normalizedMouse = u_mouse / u_viewResolution * 2.0 - 1.0;
+    vec2 camRot = normalizedMouse * vec2(PI / 2.0,  PI / 3.0) + vec2(0.0, -PI * 0.65);
+	//vec2 camRot = vec2((u_mouse.x / u_viewResolution.x - 0.5) * 2.0 * PI, (0.5 - u_mouse.y / u_viewResolution.y) * PI + PI * 0.5);
+	//vec2 camRot = vec2(u_yaw, u_pitch);
     
     //rotate
     vec3 rd = normalize(rotateXY(camDir, camRot.yx));
@@ -148,6 +198,7 @@ float4 main(float2 fragCoord) {
 	vec2 imageCoord = texCoord * u_imageResolution;
 
 	return image.eval(imageCoord);
+	//return vec4(u_mouse.x / u_viewResolution.x, 0.0, 0.0, 1.0);
 }
 		)";
 
