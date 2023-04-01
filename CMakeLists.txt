@@ -75,8 +75,8 @@ add_executable(streetview_client ${APPLICATION_TYPE}
 	src/main.cpp
 	src/parse.cpp
 	src/extract.cpp
-	src/equirectangular.cpp
 	src/renderer.cpp
+	src/download.cpp
 )
 
 set_target_properties(streetview_client PROPERTIES POSITION_INDEPENDENT_CODE ON)

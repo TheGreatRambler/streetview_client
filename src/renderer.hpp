@@ -8,9 +8,9 @@
 #define GLFW_INCLUDE_GLCOREARB
 #include <GLFW/glfw3.h>
 
-class EquirectangularWindow {
+class InterfaceWindow {
 public:
-	void PrepareWindow();
+	bool PrepareWindow();
 	void SetImage(sk_sp<SkImage> image) {
 		current_image = image;
 	}
@@ -47,6 +47,7 @@ private:
 	SkRuntimeShaderBuilder* shader_builder = nullptr;
 	sk_sp<SkRuntimeEffect> shader_effect   = nullptr;
 	sk_sp<SkImageFilter> spherical_filter;
+	std::chrono::steady_clock::time_point timing_start;
 	int width;
 	int height;
 	int frame = 0;

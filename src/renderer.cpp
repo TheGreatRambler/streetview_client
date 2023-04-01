@@ -23,10 +23,9 @@
 #include <string.h>
 #include <ui.h>
 
-void EquirectangularWindow::PrepareWindow() {
-	/* Initialize the library */
+bool InterfaceWindow::PrepareWindow() {
 	if(!glfwInit()) {
-		// return nullptr;
+		return false;
 	}
 
 #ifdef __APPLE__
@@ -43,15 +42,14 @@ void EquirectangularWindow::PrepareWindow() {
 	window = glfwCreateWindow(1, 1, "Hello World", NULL, NULL);
 	if(!window) {
 		glfwTerminate();
-		// return nullptr;
+		return false;
 	}
 
 	glfwGetFramebufferSize(window, &width, &height);
 
 	glfwSetCursorPosCallback(
 		window, *[](GLFWwindow* window, double x, double y) {
-			EquirectangularWindow* renderer
-				= (EquirectangularWindow*)glfwGetWindowUserPointer(window);
+			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
 			if(glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_RELEASE) {
 				if(!renderer->glfw_events.currently_dragging) {
 					renderer->glfw_events.drag_start_x = x;
@@ -75,13 +73,22 @@ void EquirectangularWindow::PrepareWindow() {
 		});
 	glfwSetScrollCallback(
 		window, *[](GLFWwindow* window, double x_offset, double y_offset) {
-			EquirectangularWindow* renderer
-				= (EquirectangularWindow*)glfwGetWindowUserPointer(window);
+			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
 			renderer->glfw_events.zoom += y_offset / 3.0;
 			if(renderer->glfw_events.zoom < 4.0) {
 				renderer->glfw_events.zoom = 4.0;
 			} else if(renderer->glfw_events.zoom > 15.0) {
 				renderer->glfw_events.zoom = 15.0;
+			}
+		});
+	glfwSetKeyCallback(
+		window, *[](GLFWwindow* window, int key, int scancode, int action, int mods) {
+			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
+			if(key == GLFW_KEY_UP && action == GLFW_PRESS) {
+				// Load another panorama
+				renderer->SetImage(SkImage::MakeFromEncoded(
+					SkData::MakeFromFileName("tiles/stitched-NRQ3LOFsRR15hQaPleVRug.png")));
+				renderer->PrepareShader();
 			}
 		});
 
@@ -113,17 +120,24 @@ void EquirectangularWindow::PrepareWindow() {
 	// kBottomLeft_GrSurfaceOrigin, colorType, SkColorSpace::MakeSRGB(), nullptr).release();
 	surface = SkSurface::MakeFromBackendRenderTarget(direct_context.get(), backendRenderTarget,
 		kBottomLeft_GrSurfaceOrigin, colorType, nullptr, nullptr);
+
+	timing_start = std::chrono::high_resolution_clock::now();
+	return true;
 }
 
-void EquirectangularWindow::DrawFrame() {
+void InterfaceWindow::DrawFrame() {
 	RenderPanorama();
 	surface->getCanvas()->flush();
 	glfwSwapBuffers(window);
 	glfwPollEvents();
 	frame++;
+
+	// fmt::print("FPS: {}\n", (double)frame
+	//							/ (std::chrono::high_resolution_clock::now() - timing_start).count()
+	//							* 1000.0);
 }
 
-void EquirectangularWindow::RenderPanorama() {
+void InterfaceWindow::RenderPanorama() {
 	if(shader_builder) {
 		// Set view resolution
 		shader_builder->uniform("u_viewResolution")
@@ -152,7 +166,7 @@ void EquirectangularWindow::RenderPanorama() {
 }
 
 #define PI 3.14159265358979323846264
-void EquirectangularWindow::PrepareShader() {
+void InterfaceWindow::PrepareShader() {
 	const char* sksl_src = R"(
 // Handle 8 images at once, each one max 2048x2048
 uniform shader image;
@@ -223,4 +237,4 @@ float4 main(float2 fragCoord) {
 		= current_image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
 }
 
-void EquirectangularWindow::UpdateCamera(double pitch, double yaw, double hfov) { }
+void InterfaceWindow::UpdateCamera(double pitch, double yaw, double hfov) { }
