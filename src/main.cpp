@@ -1,4 +1,3 @@
-#define RAPIDJSON_HAS_STDSTRING 1
 #define SK_ENCODE_PNG
 
 #include <CLI/App.hpp>
@@ -40,8 +39,8 @@
 #include "download.hpp"
 #include "extract.hpp"
 #include "headers.hpp"
+#include "interface.hpp"
 #include "parse.hpp"
-#include "renderer.hpp"
 
 int main(int argc, char** argv) {
 	CLI::App app { "Street View custom client in C++" };
@@ -62,18 +61,18 @@ int main(int argc, char** argv) {
 		"increase resolution");
 
 	auto& render_sub = *app.add_subcommand("render", "Render panoramas");
-	std::string filename;
-	render_sub.add_option("-f,--filename", filename, "Equirectangular image filename")->required();
+	std::string initial_id;
+	render_sub.add_option("-i,--id", initial_id, "Initial panorama ID")->required();
 
 	CLI11_PARSE(app, argc, argv);
 
+	curl_global_init(CURL_GLOBAL_ALL);
 	if(download_sub) {
 		std::chrono::time_point<std::chrono::steady_clock> start;
 		std::chrono::time_point<std::chrono::steady_clock> stop;
 
 		start = std::chrono::high_resolution_clock::now();
 
-		curl_global_init(CURL_GLOBAL_ALL);
 		auto curl_handle = curl_easy_init();
 
 		auto client_id = download_client_id(curl_handle);
@@ -88,26 +87,24 @@ int main(int argc, char** argv) {
 			start = std::chrono::high_resolution_clock::now();
 
 			// Get photometa
-			auto photmeta_document = download_photometa(curl_handle, client_id, panorama_id);
+			auto photometa_document = download_photometa(curl_handle, client_id, panorama_id);
 
 			// Get panorama
 			auto tile_surface
-				= download_panorama(curl_handle, panorama_id, streetview_zoom, photmeta_document);
+				= download_panorama(curl_handle, panorama_id, streetview_zoom, photometa_document);
 
 			std::string filename = fmt::format("tiles/stitched-{}.png", panorama_id);
 
-			// std::cout << "Location: "
-			//		  << extract_location(photometa_document).city_and_state
+			// std::cout << "Location: " << extract_location(photometa_document).city_and_state
 			//		  << std::endl;
-			// for(auto& adjacent : extract_adjacent_panoramas(photometa_document))
-			// { 	std::cout << "Adjacent: " << adjacent.id << " " << adjacent.lat
-			//			  << " " << adjacent.lng << std::endl;
+			// for(auto& adjacent : extract_adjacent_panoramas(photometa_document)) {
+			//	std::cout << "Adjacent: " << adjacent.id << " " << adjacent.lat << " "
+			//			  << adjacent.lng << std::endl;
 			// }
 
 			std::filesystem::create_directory("tiles");
 
-			auto tile_data
-				= tile_surface->makeImageSnapshot()->encodeToData(SkEncodedImageFormat::kPNG, 95);
+			auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
 			std::ofstream outfile(filename, std::ios::out | std::ios::binary);
 			outfile.write((const char*)tile_data->bytes(), tile_data->size());
 			outfile.close();
@@ -120,13 +117,13 @@ int main(int argc, char** argv) {
 		curl_easy_cleanup(curl_handle);
 		curl_global_cleanup();
 	} else if(render_sub) {
-		InterfaceWindow window;
+		auto curl_handle = curl_easy_init();
+		InterfaceWindow window(initial_id, curl_handle);
 		window.PrepareWindow();
-		window.SetImage(SkImage::MakeFromEncoded(SkData::MakeFromFileName(filename.c_str())));
-		window.PrepareShader();
 		while(!window.ShouldClose()) {
 			window.DrawFrame();
 		}
+		curl_easy_cleanup(curl_handle);
 	}
 
 	return 0;

@@ -13,6 +13,3 @@
 [submodule "third_party/rapidjson"]
 	path = third_party/rapidjson
 	url = https://github.com/Tencent/rapidjson
-[submodule "third_party/libui"]
-	path = third_party/libui
-	url = https://github.com/andlabs/libui

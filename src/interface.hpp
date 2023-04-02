@@ -8,15 +8,22 @@
 #define GLFW_INCLUDE_GLCOREARB
 #include <GLFW/glfw3.h>
 
+#include <iostream>
+#include <memory>
+#include <vector>
+
+#include "extract.hpp"
+#include "preloader.hpp"
+
 class InterfaceWindow {
 public:
+	InterfaceWindow(std::string initial_panorama_id, CURL* curl_handle);
+
 	bool PrepareWindow();
-	void SetImage(sk_sp<SkImage> image) {
-		current_image = image;
-	}
 	void DrawFrame();
+	void ChangePanorama(std::string id);
 	void PrepareShader();
-	void UpdateCamera(double pitch, double yaw, double hfov);
+	Panorama& GetClosestAdjacent();
 
 	bool ShouldClose() {
 		return glfwWindowShouldClose(window);
@@ -39,11 +46,12 @@ public:
 
 private:
 	void RenderPanorama();
+	void RenderMap();
 
+	// Render variables
 	sk_sp<SkSurface> surface;
 	GLFWwindow* window;
 	sk_sp<GrDirectContext> direct_context;
-	sk_sp<SkImage> current_image;
 	SkRuntimeShaderBuilder* shader_builder = nullptr;
 	sk_sp<SkRuntimeEffect> shader_effect   = nullptr;
 	sk_sp<SkImageFilter> spherical_filter;
@@ -51,4 +59,13 @@ private:
 	int width;
 	int height;
 	int frame = 0;
+
+	// Panorama variables
+	CURL* curl_handle;
+	PanoramaPreloader preloader;
+	std::shared_ptr<PanoramaDownload> panorama_info;
+	Panorama current_panorama;
+	std::vector<Panorama> adjacent;
+	float yaw;
+	float pitch;
 };

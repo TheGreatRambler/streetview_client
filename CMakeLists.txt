@@ -10,6 +10,8 @@ set(
   "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-extern-initializer -Wno-deprecated-enum-enum-conversion"
 )
 
+add_definitions(-DRAPIDJSON_HAS_STDSTRING)
+
 if(CMAKE_BUILD_TYPE EQUAL "DEBUG")
 	add_link_options(-g -O0)
 endif()
@@ -51,23 +53,6 @@ else()
 endif()
 execute_process(COMMAND ninja WORKING_DIRECTORY ${SKIA_BUILD_DIR})
 
-# LibUI for the renderer
-set(LIBUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libui)
-set(LIBUI_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/third_party/libui)
-file(MAKE_DIRECTORY ${LIBUI_BUILD_DIR})
-execute_process(
-	COMMAND meson setup . ${LIBUI_DIR}
-	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
-execute_process(
-	COMMAND meson configure -Ddefault_library=static
-	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
-execute_process( 
-	COMMAND meson compile
-	WORKING_DIRECTORY ${LIBUI_BUILD_DIR})
-add_library(libui STATIC IMPORTED)
-set_property(TARGET libui PROPERTY
-	IMPORTED_LOCATION ${LIBUI_BUILD_DIR}/meson-out/libui.a)
-
 # For OpenGL
 find_package(glfw3 3.3 REQUIRED)
 
@@ -75,8 +60,10 @@ add_executable(streetview_client ${APPLICATION_TYPE}
 	src/main.cpp
 	src/parse.cpp
 	src/extract.cpp
-	src/renderer.cpp
+	src/headers.cpp
+	src/interface.cpp
 	src/download.cpp
+	src/preloader.cpp
 )
 
 set_target_properties(streetview_client PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -88,5 +75,5 @@ set_target_properties(streetview_client PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		POSITION_INDEPENDENT_CODE ON)
 
-include_directories(streetview_client include fmt libcurl CLI11 glfw3 ${SKIA_DIR} ${SKIA_DIR}/include ${LIBUI_DIR} ${RAPIDJSON_INCLUDE_DIR})
-target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11 skia libui "-framework OpenGl" "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices" "-framework Cocoa" "-framework Metal" "-framework Foundation" "-framework QuartzCore" glfw)
+include_directories(streetview_client include fmt libcurl CLI11 glfw3 ${SKIA_DIR} ${SKIA_DIR}/include ${RAPIDJSON_INCLUDE_DIR})
+target_link_libraries(streetview_client PUBLIC fmt libcurl CLI11 skia "-framework OpenGl" "-framework CoreFoundation" "-framework CoreGraphics" "-framework CoreText" "-framework CoreServices" "-framework Cocoa" "-framework Metal" "-framework Foundation" "-framework QuartzCore" glfw)

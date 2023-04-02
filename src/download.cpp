@@ -81,6 +81,7 @@ rapidjson::Document download_preview_document(
 
 rapidjson::Document download_photometa(
 	CURL* curl_handle, std::string client_id, std::string panorama_id) {
+
 	CURLcode res;
 	auto photometa_url = fmt::format("https://www.google.com/maps/photometa/"
 									 "v1?authuser=0&hl=en&gl=us&pb=!1m4!1smaps_sv.tactile!11m2!"
@@ -101,18 +102,21 @@ rapidjson::Document download_photometa(
 	return photometa_document;
 }
 
-sk_sp<SkSurface> download_panorama(CURL* curl_handle, std::string panorama_id, int streetview_zoom,
+sk_sp<SkImage> download_panorama(CURL* curl_handle, std::string panorama_id, int streetview_zoom,
 	rapidjson::Document& photmeta_document) {
 	auto [tiles_width, tiles_height] = extract_tiles_dimensions(photmeta_document, streetview_zoom);
 
 	sk_sp<SkSurface> tile_surface
 		= SkSurface::MakeRasterN32Premul(tiles_width * 512, tiles_height * 512);
 
+	fmt::print("Downloading {} tiles\n", tiles_width * tiles_height);
+
 	// Start processing
 	tile_surface->getCanvas()->clear(SK_ColorWHITE);
 	for(int y = 0; y < tiles_height; y++) {
 		for(int x = 0; x < tiles_width; x++) {
 			// Download the specific tile
+			// Each tile takes around ~40ms to download
 			CURLcode res;
 			auto tile_url = fmt::format("https://streetviewpixels-pa.googleapis.com/v1/"
 										"tile?cb_client=maps_sv.tactile&panoid={}&x={}&"
@@ -126,6 +130,7 @@ sk_sp<SkSurface> download_panorama(CURL* curl_handle, std::string panorama_id, i
 				curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_code);
 				if(http_code == 200) {
 					// Construct an image from the data
+					// This is less than 1ms
 					auto image = SkImage::MakeFromEncoded(
 						SkData::MakeWithoutCopy(tile_download.data(), tile_download.size()));
 					tile_surface->getCanvas()->drawImage(image, 512 * x, 512 * y);
@@ -136,5 +141,5 @@ sk_sp<SkSurface> download_panorama(CURL* curl_handle, std::string panorama_id, i
 		}
 	}
 
-	return tile_surface;
+	return tile_surface->makeImageSnapshot();
 }

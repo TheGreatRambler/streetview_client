@@ -18,6 +18,7 @@ struct Panorama {
 };
 
 std::vector<std::string> extract_panorama_ids(rapidjson::Document& preview_document);
+Panorama extract_info(rapidjson::Document& photometa_document);
 Location extract_location(rapidjson::Document& photometa_document);
 std::vector<Panorama> extract_adjacent_panoramas(rapidjson::Document& photometa_document);
 std::pair<double, double> extract_tiles_dimensions(

@@ -1,8 +1,9 @@
-#include "renderer.hpp"
+#include "interface.hpp"
 
 #define SK_GL 1
 #define SK_GANESH 1
 #define SK_ENABLE_SKSL 1
+#define PI 3.14159265358979323846264f
 
 #include <core/SkBitmap.h>
 #include <core/SkCanvas.h>
@@ -21,7 +22,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ui.h>
+
+#include "download.hpp"
+
+InterfaceWindow::InterfaceWindow(std::string initial_panorama_id, CURL* curl_handle) {
+	// Start preloader
+	preloader.SetClientId(download_client_id(curl_handle));
+	preloader.SetZoom(1);
+	preloader.SetCurlHandle(curl_handle);
+	preloader.Start(5);
+
+	// Set initial panorama
+	ChangePanorama(initial_panorama_id);
+}
 
 bool InterfaceWindow::PrepareWindow() {
 	if(!glfwInit()) {
@@ -39,7 +52,7 @@ bool InterfaceWindow::PrepareWindow() {
 
 	/* Create a windowed mode window and its OpenGL context */
 	glfwWindowHint(GLFW_MAXIMIZED, 1);
-	window = glfwCreateWindow(1, 1, "Hello World", NULL, NULL);
+	window = glfwCreateWindow(1, 1, "Streetview Client", NULL, NULL);
 	if(!window) {
 		glfwTerminate();
 		return false;
@@ -85,15 +98,15 @@ bool InterfaceWindow::PrepareWindow() {
 		window, *[](GLFWwindow* window, int key, int scancode, int action, int mods) {
 			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
 			if(key == GLFW_KEY_UP && action == GLFW_PRESS) {
-				// Load another panorama
-				renderer->SetImage(SkImage::MakeFromEncoded(
-					SkData::MakeFromFileName("tiles/stitched-NRQ3LOFsRR15hQaPleVRug.png")));
-				renderer->PrepareShader();
+				// Load closest adjacent
+				renderer->ChangePanorama(renderer->GetClosestAdjacent().id);
 			}
 		});
 
 	// Make the window's context current
 	glfwMakeContextCurrent(window);
+	// Force fast rendering, probably 120fps
+	glfwSwapInterval(0);
 
 	// Set the user pointer
 	glfwSetWindowUserPointer(window, this);
@@ -115,11 +128,8 @@ bool InterfaceWindow::PrepareWindow() {
 		0, // stencil bits
 		framebufferInfo);
 
-	//(replace line below with this one to enable correct color spaces) sSurface =
-	// SkSurface::MakeFromBackendRenderTarget(sContext, backendRenderTarget,
-	// kBottomLeft_GrSurfaceOrigin, colorType, SkColorSpace::MakeSRGB(), nullptr).release();
 	surface = SkSurface::MakeFromBackendRenderTarget(direct_context.get(), backendRenderTarget,
-		kBottomLeft_GrSurfaceOrigin, colorType, nullptr, nullptr);
+		kBottomLeft_GrSurfaceOrigin, colorType, SkColorSpace::MakeSRGB(), nullptr);
 
 	timing_start = std::chrono::high_resolution_clock::now();
 	return true;
@@ -127,6 +137,7 @@ bool InterfaceWindow::PrepareWindow() {
 
 void InterfaceWindow::DrawFrame() {
 	RenderPanorama();
+	RenderMap();
 	surface->getCanvas()->flush();
 	glfwSwapBuffers(window);
 	glfwPollEvents();
@@ -137,15 +148,34 @@ void InterfaceWindow::DrawFrame() {
 	//							* 1000.0);
 }
 
+void InterfaceWindow::ChangePanorama(std::string id) {
+	panorama_info    = preloader.GetPanorama(id, true);
+	current_panorama = extract_info(panorama_info->photometa);
+	adjacent         = extract_adjacent_panoramas(panorama_info->photometa);
+	PrepareShader();
+
+	for(auto& panorama : adjacent) {
+		preloader.QueuePanorama(panorama.id);
+	}
+}
+
 void InterfaceWindow::RenderPanorama() {
 	if(shader_builder) {
 		// Set view resolution
 		shader_builder->uniform("u_viewResolution")
 			= SkV2 { (float)surface->width(), (float)surface->height() };
 
-		// Set mouse location from drag
-		shader_builder->uniform("u_mouse")
-			= SkV2 { (float)glfw_events.screen_offset_x, (float)glfw_events.screen_offset_y };
+		// Calculate yaw and pitch in C++
+		// This is important because it is needed later for streetview navigation
+		auto normalized_x
+			= (float)glfw_events.screen_offset_x / (float)surface->width() * 2.0f - 1.0f;
+		auto normalized_y
+			= (float)glfw_events.screen_offset_y / (float)surface->height() * 2.0f - 1.0f;
+		yaw   = normalized_x * PI * 0.5f;
+		pitch = normalized_y * PI * 0.33f + -PI * 0.65f;
+
+		// Set mouse rotation
+		shader_builder->uniform("u_rotation") = SkV2 { yaw, pitch };
 
 		// Correct FOV formula
 		// Vertical FOV = Initial FOV / Zoom
@@ -165,55 +195,87 @@ void InterfaceWindow::RenderPanorama() {
 	}
 }
 
-#define PI 3.14159265358979323846264
+void InterfaceWindow::RenderMap() {
+	constexpr int map_width  = 800;
+	constexpr int map_height = 800;
+	constexpr double scale   = 500000.0;
+
+	// Render in bottom right, 200 by 200
+	int start_x = surface->width() - map_width;
+	int start_y = surface->height() - map_height;
+
+	// Draw the background
+	SkPaint background_paint;
+	background_paint.setColor(SkColorSetARGB(255, 255, 255, 255));
+	surface->getCanvas()->drawRect(
+		SkRect::MakeXYWH(start_x, start_y, map_width, map_height), background_paint);
+
+	// Get closest adjacent
+	auto closest_adjacent = GetClosestAdjacent();
+
+	// Draw the adjacent
+	SkPaint adjacent_panorama_paint;
+	for(auto& panorama : adjacent) {
+		if(panorama.id == closest_adjacent.id) {
+			adjacent_panorama_paint.setColor(SkColorSetARGB(255, 255, 0, 0));
+		} else {
+			adjacent_panorama_paint.setColor(SkColorSetARGB(255, 0, 0, 255));
+		}
+
+		surface->getCanvas()->drawCircle(
+			start_x + map_width / 2 + (panorama.lat - current_panorama.lat) * scale,
+			start_y + map_height / 2 + (panorama.lng - current_panorama.lng) * scale, 8,
+			adjacent_panorama_paint);
+	}
+
+	// Draw the current panorama
+	SkPaint current_panorama_paint;
+	current_panorama_paint.setColor(SkColorSetARGB(255, 0, 255, 0));
+	surface->getCanvas()->drawCircle(
+		start_x + map_width / 2, start_y + map_height / 2, 12, current_panorama_paint);
+}
+
 void InterfaceWindow::PrepareShader() {
 	const char* sksl_src = R"(
-// Handle 8 images at once, each one max 2048x2048
-uniform shader image;
+	// Handle 8 images at once, each one max 2048x2048
+	uniform shader image;
 
-uniform vec2 u_imageResolution;
-uniform vec2 u_viewResolution;
-uniform vec2 u_mouse;
+	uniform vec2 u_imageResolution;
+	uniform vec2 u_viewResolution;
+	uniform vec2 u_rotation;
 
-//uniform float u_pitch;
-//uniform float u_yaw;
-uniform float u_fovH;
-uniform float u_fovV;
+	//uniform float u_pitch;
+	//uniform float u_yaw;
+	uniform float u_fovH;
+	uniform float u_fovV;
 
-const float PI = 3.14159265358979323846264;
-const float PI2 = 3.14159265358979323846264 * 2.0;
-const float PI_2 = 3.14159265358979323846264 * 0.5;
+	const float PI = 3.14159265358979323846264;
+	const float PI2 = 3.14159265358979323846264 * 2.0;
+	const float PI_2 = 3.14159265358979323846264 * 0.5;
 
-//tools
-vec3 rotateXY(vec3 p, vec2 angle) {
-    vec2 c = cos(angle), s = sin(angle);
-    p = vec3(p.x, c.x*p.y + s.x*p.z, -s.x*p.y + c.x*p.z);
-    return vec3(c.y*p.x + s.y*p.z, p.y, -s.y*p.x + c.y*p.z);
-}
+	vec3 rotateXY(vec3 p, vec2 angle) {
+	    vec2 c = cos(angle), s = sin(angle);
+	    p = vec3(p.x, c.x*p.y + s.x*p.z, -s.x*p.y + c.x*p.z);
+	    return vec3(c.y*p.x + s.y*p.z, p.y, -s.y*p.x + c.y*p.z);
+	}
 
-float4 main(float2 fragCoord) {
-	//place 0,0 in center from -1 to 1 ndc
-    vec2 uv = fragCoord * 2.0 / u_viewResolution - 1.0;
+	float4 main(float2 fragCoord) {
+		// Place 0,0 in center from -1 to 1 ndc
+	    vec2 uv = fragCoord * 2.0 / u_viewResolution - 1.0;
+
+	    // Spherical
+	    vec3 camDir = normalize(vec3(uv * vec2(tan(0.5 * u_fovH), tan(0.5 * u_fovV)), 1.0));
 	
-    //to spherical
-    vec3 camDir = normalize(vec3(uv * vec2(tan(0.5 * u_fovH), tan(0.5 * u_fovV)), 1.0));
-    
-    //camRot is angle vec in rad
-	vec2 normalizedMouse = u_mouse / u_viewResolution * 2.0 - 1.0;
-    vec2 camRot = normalizedMouse * vec2(PI / 2.0,  PI / 3.0) + vec2(0.0, -PI * 0.65);
-	//vec2 camRot = vec2((u_mouse.x / u_viewResolution.x - 0.5) * 2.0 * PI, (0.5 - u_mouse.y / u_viewResolution.y) * PI + PI * 0.5);
-	//vec2 camRot = vec2(u_yaw, u_pitch);
-    
-    //rotate
-    vec3 rd = normalize(rotateXY(camDir, camRot.yx));
-    
-    //radial azmuth polar
-    vec2 texCoord = 1 - vec2(atan(rd.z, rd.x) + PI, acos(-rd.y)) / vec2(2.0 * PI, PI);
-	vec2 imageCoord = texCoord * u_imageResolution;
+	    // Rotate
+	    vec3 rd = normalize(rotateXY(camDir, u_rotation.yx));
+	
+	    // Radial azmuth polar
+	    vec2 texCoord = vec2(atan(rd.z, rd.x) + PI, acos(-rd.y)) / vec2(2.0 * PI, PI);
+		// Y is flipped but X is not
+		vec2 imageCoord = vec2(texCoord.x, 1 - texCoord.y) * u_imageResolution;
 
-	return image.eval(imageCoord);
-	//return vec4(u_mouse.x / u_viewResolution.x, 0.0, 0.0, 1.0);
-}
+		return image.eval(imageCoord);
+	}
 		)";
 
 	auto [effect, errorText] = SkRuntimeEffect::MakeForShader(SkString(sksl_src));
@@ -230,11 +292,43 @@ float4 main(float2 fragCoord) {
 
 	// Set one time image resolution
 	shader_builder->uniform("u_imageResolution")
-		= SkV2 { (float)current_image->width(), (float)current_image->height() };
+		= SkV2 { (float)panorama_info->image->width(), (float)panorama_info->image->height() };
 
-	// Set one time image
+	// Set image
 	shader_builder->child("image")
-		= current_image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
+		= panorama_info->image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
 }
 
-void InterfaceWindow::UpdateCamera(double pitch, double yaw, double hfov) { }
+Panorama& InterfaceWindow::GetClosestAdjacent() {
+	auto current_yaw = std::fmod(std::fmod(yaw + PI, 2 * PI) + 2 * PI, 2 * PI);
+	// std::cout << "Current: " << current_yaw / PI << std::endl;
+	Panorama closest_panorama;
+	double closest_difference = 1000;
+	for(auto& panorama : adjacent) {
+		// Get angle of this adjacent panorama
+		// Angle is between 0 and 2PI
+		auto angle = std::atan2(-(panorama.lng - current_panorama.lng),
+						 panorama.lat - current_panorama.lat)
+					 + PI;
+
+		/*
+		double smallest_arc;
+		if (fabs(angle-current_yaw) < M_PI)        smallest_arc =  angle-current_yaw;    if
+		(angle>current_yaw)        return angle-current_yaw-M_PI*2.0f;    return
+		angle-current_yaw+M_PI*2.0f;
+		*/
+
+		// std::cout << "This: " << angle / PI << std::endl;
+
+		// 1.3
+		// -1.8
+		// 0.2
+		// -2.8
+
+		if(std::abs(angle - current_yaw) < closest_difference) {
+			closest_difference = angle - current_yaw;
+			closest_panorama   = panorama;
+		}
+	}
+	return closest_panorama;
+}
