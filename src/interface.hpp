@@ -24,6 +24,7 @@ public:
 	void ChangePanorama(std::string id);
 	void PrepareShader();
 	Panorama& GetClosestAdjacent();
+	void SwitchToAdjacent(double x, double y);
 
 	bool ShouldClose() {
 		return glfwWindowShouldClose(window);
@@ -47,6 +48,9 @@ public:
 private:
 	void RenderPanorama();
 	void RenderMap();
+	SkPoint GetMapPoint(Panorama& adjacent);
+	void QueueCloseAdjacent();
+	double PanoramaClosenessHeuristic(Panorama& adjacent);
 
 	// Render variables
 	sk_sp<SkSurface> surface;
@@ -60,6 +64,10 @@ private:
 	int height;
 	int frame = 0;
 
+	const int map_width    = 800;
+	const int map_height   = 800;
+	const double map_scale = 500000.0;
+
 	// Panorama variables
 	CURL* curl_handle;
 	PanoramaPreloader preloader;
@@ -68,4 +76,5 @@ private:
 	std::vector<Panorama> adjacent;
 	float yaw;
 	float pitch;
+	double corrected_yaw;
 };

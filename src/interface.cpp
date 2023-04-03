@@ -84,6 +84,18 @@ bool InterfaceWindow::PrepareWindow() {
 				renderer->glfw_events.currently_dragging = false;
 			}
 		});
+	glfwSetMouseButtonCallback(
+		window, *[](GLFWwindow* window, int button, int action, int mods) {
+			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
+
+			if(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+				double x;
+				double y;
+				glfwGetCursorPos(window, &x, &y);
+				// Switch panorama if possible
+				renderer->SwitchToAdjacent(x * 2, y * 2);
+			}
+		});
 	glfwSetScrollCallback(
 		window, *[](GLFWwindow* window, double x_offset, double y_offset) {
 			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
@@ -98,7 +110,7 @@ bool InterfaceWindow::PrepareWindow() {
 		window, *[](GLFWwindow* window, int key, int scancode, int action, int mods) {
 			InterfaceWindow* renderer = (InterfaceWindow*)glfwGetWindowUserPointer(window);
 			if(key == GLFW_KEY_UP && action == GLFW_PRESS) {
-				// Load closest adjacent
+				// TODO this heuristic doesn't work
 				renderer->ChangePanorama(renderer->GetClosestAdjacent().id);
 			}
 		});
@@ -143,6 +155,8 @@ void InterfaceWindow::DrawFrame() {
 	glfwPollEvents();
 	frame++;
 
+	// Start queueing
+	// QueueCloseAdjacent();
 	// fmt::print("FPS: {}\n", (double)frame
 	//							/ (std::chrono::high_resolution_clock::now() - timing_start).count()
 	//							* 1000.0);
@@ -153,10 +167,6 @@ void InterfaceWindow::ChangePanorama(std::string id) {
 	current_panorama = extract_info(panorama_info->photometa);
 	adjacent         = extract_adjacent_panoramas(panorama_info->photometa);
 	PrepareShader();
-
-	for(auto& panorama : adjacent) {
-		preloader.QueuePanorama(panorama.id);
-	}
 }
 
 void InterfaceWindow::RenderPanorama() {
@@ -173,6 +183,9 @@ void InterfaceWindow::RenderPanorama() {
 			= (float)glfw_events.screen_offset_y / (float)surface->height() * 2.0f - 1.0f;
 		yaw   = normalized_x * PI * 0.5f;
 		pitch = normalized_y * PI * 0.33f + -PI * 0.65f;
+
+		// Calculate corrected yaw
+		corrected_yaw = std::fmod(std::fmod(yaw - PI, 2 * PI) + 2 * PI, 2 * PI);
 
 		// Set mouse rotation
 		shader_builder->uniform("u_rotation") = SkV2 { yaw, pitch };
@@ -196,10 +209,6 @@ void InterfaceWindow::RenderPanorama() {
 }
 
 void InterfaceWindow::RenderMap() {
-	constexpr int map_width  = 800;
-	constexpr int map_height = 800;
-	constexpr double scale   = 500000.0;
-
 	// Render in bottom right, 200 by 200
 	int start_x = surface->width() - map_width;
 	int start_y = surface->height() - map_height;
@@ -210,22 +219,13 @@ void InterfaceWindow::RenderMap() {
 	surface->getCanvas()->drawRect(
 		SkRect::MakeXYWH(start_x, start_y, map_width, map_height), background_paint);
 
-	// Get closest adjacent
-	auto closest_adjacent = GetClosestAdjacent();
-
 	// Draw the adjacent
 	SkPaint adjacent_panorama_paint;
 	for(auto& panorama : adjacent) {
-		if(panorama.id == closest_adjacent.id) {
-			adjacent_panorama_paint.setColor(SkColorSetARGB(255, 255, 0, 0));
-		} else {
-			adjacent_panorama_paint.setColor(SkColorSetARGB(255, 0, 0, 255));
-		}
+		adjacent_panorama_paint.setColor(
+			SkColorSetARGB(255, PanoramaClosenessHeuristic(panorama) * 100.0, 0, 0));
 
-		surface->getCanvas()->drawCircle(
-			start_x + map_width / 2 + (panorama.lat - current_panorama.lat) * scale,
-			start_y + map_height / 2 + (panorama.lng - current_panorama.lng) * scale, 8,
-			adjacent_panorama_paint);
+		surface->getCanvas()->drawCircle(GetMapPoint(panorama), 8, adjacent_panorama_paint);
 	}
 
 	// Draw the current panorama
@@ -233,6 +233,14 @@ void InterfaceWindow::RenderMap() {
 	current_panorama_paint.setColor(SkColorSetARGB(255, 0, 255, 0));
 	surface->getCanvas()->drawCircle(
 		start_x + map_width / 2, start_y + map_height / 2, 12, current_panorama_paint);
+}
+
+SkPoint InterfaceWindow::GetMapPoint(Panorama& adjacent) {
+	int start_x = surface->width() - map_width;
+	int start_y = surface->height() - map_height;
+	return SkPoint::Make(
+		start_x + map_width / 2 + (adjacent.lat - current_panorama.lat) * map_scale,
+		start_y + map_height / 2 + (adjacent.lng - current_panorama.lng) * map_scale);
 }
 
 void InterfaceWindow::PrepareShader() {
@@ -300,35 +308,60 @@ void InterfaceWindow::PrepareShader() {
 }
 
 Panorama& InterfaceWindow::GetClosestAdjacent() {
-	auto current_yaw = std::fmod(std::fmod(yaw + PI, 2 * PI) + 2 * PI, 2 * PI);
-	// std::cout << "Current: " << current_yaw / PI << std::endl;
 	Panorama closest_panorama;
 	double closest_difference = 1000;
 	for(auto& panorama : adjacent) {
-		// Get angle of this adjacent panorama
-		// Angle is between 0 and 2PI
-		auto angle = std::atan2(-(panorama.lng - current_panorama.lng),
-						 panorama.lat - current_panorama.lat)
-					 + PI;
+		auto heuristic = PanoramaClosenessHeuristic(panorama);
 
-		/*
-		double smallest_arc;
-		if (fabs(angle-current_yaw) < M_PI)        smallest_arc =  angle-current_yaw;    if
-		(angle>current_yaw)        return angle-current_yaw-M_PI*2.0f;    return
-		angle-current_yaw+M_PI*2.0f;
-		*/
-
-		// std::cout << "This: " << angle / PI << std::endl;
-
-		// 1.3
-		// -1.8
-		// 0.2
-		// -2.8
-
-		if(std::abs(angle - current_yaw) < closest_difference) {
-			closest_difference = angle - current_yaw;
+		if(heuristic < closest_difference) {
+			closest_difference = heuristic;
 			closest_panorama   = panorama;
 		}
 	}
 	return closest_panorama;
+}
+
+void InterfaceWindow::SwitchToAdjacent(double x, double y) {
+	int start_x = surface->width() - map_width;
+	int start_y = surface->height() - map_height;
+	// Check if click is on map
+	if(x > start_x && x < surface->width() && y > start_y && y < surface->height()) {
+		// Find closest
+		Panorama closest_panorama;
+		double closest_dist = 1000;
+		for(auto& panorama : adjacent) {
+			auto loc  = GetMapPoint(panorama);
+			auto dist = std::sqrt(std::pow(loc.x() - x, 2) + std::pow(loc.y() - y, 2));
+
+			if(dist < closest_dist) {
+				closest_dist     = dist;
+				closest_panorama = panorama;
+			}
+		}
+
+		// Switch to it
+		ChangePanorama(closest_panorama.id);
+	}
+}
+
+void InterfaceWindow::QueueCloseAdjacent() {
+	auto sorted_adjacent = adjacent;
+	std::sort(sorted_adjacent.begin(), sorted_adjacent.end(), [this](Panorama& a, Panorama& b) {
+		return PanoramaClosenessHeuristic(b) < PanoramaClosenessHeuristic(a);
+	});
+
+	// Only use first half
+	for(int i = 0; i < sorted_adjacent.size() / 2; i++) {
+		preloader.QueuePanorama(sorted_adjacent[i].id);
+	}
+}
+
+double InterfaceWindow::PanoramaClosenessHeuristic(Panorama& adjacent) {
+	auto angle
+		= std::atan2(-(adjacent.lng - current_panorama.lng), adjacent.lat - current_panorama.lat)
+		  + PI;
+	return std::abs(angle - corrected_yaw)
+		   + std::sqrt(std::pow(adjacent.lat - current_panorama.lat, 2)
+					   + std::pow(adjacent.lng - current_panorama.lng, 2))
+				 * 3000.0;
 }

@@ -13,8 +13,11 @@ void PanoramaPreloader::Start(int num_threads) {
 }
 
 void PanoramaPreloader::QueuePanorama(std::string id) {
-	std::scoped_lock lock { queued_panoramas_m };
-	queued_panoramas.emplace_back(id);
+	std::scoped_lock lock { queued_panoramas_m, panoramas_m };
+	// Panorama must not already be downloaded and the queue must be smaller than 100
+	if(!panoramas.count(id) && queued_panoramas.size() < 100) {
+		queued_panoramas.emplace_back(id);
+	}
 }
 
 std::shared_ptr<PanoramaDownload> PanoramaPreloader::GetPanorama(std::string id, bool force) {
@@ -54,7 +57,7 @@ void PanoramaPreloader::PanoramaThread() {
 
 		panoramas_m.lock();
 		if(panoramas.count(id)) {
-			// Ignore this panorama
+			// Ignore this panorama, we already downloaded it
 			panoramas_m.unlock();
 			continue;
 		}
