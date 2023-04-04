@@ -1,10 +1,14 @@
 #include "extract.hpp"
 
+#define _USE_MATH_DEFINES
+#define DEG_RAD 0.0174533
+
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/reader.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <cmath>
 #include <iostream>
 
 std::vector<std::string> extract_panorama_ids(rapidjson::Document& preview_document) {
@@ -22,12 +26,16 @@ std::vector<std::string> extract_panorama_ids(rapidjson::Document& preview_docum
 }
 
 Panorama extract_info(rapidjson::Document& photometa_document) {
-	auto& id       = photometa_document[1][0][1][1];
-	auto& lat_long = photometa_document[1][0][5][0][1][0];
+	auto& id             = photometa_document[1][0][1][1];
+	auto& lat_long       = photometa_document[1][0][5][0][1][0];
+	auto& yaw_pitch_roll = photometa_document[1][0][5][0][1][2];
 	return Panorama {
-		.id  = id.GetString(),
-		.lat = lat_long[2].GetDouble(),
-		.lng = lat_long[3].GetDouble(),
+		.id    = id.GetString(),
+		.lat   = lat_long[2].GetDouble(),
+		.lng   = lat_long[3].GetDouble(),
+		.yaw   = yaw_pitch_roll[0].GetDouble() * DEG_RAD,
+		.pitch = yaw_pitch_roll[1].GetDouble() * DEG_RAD,
+		.roll  = yaw_pitch_roll[2].GetDouble() * DEG_RAD,
 	};
 }
 
@@ -52,9 +60,12 @@ std::vector<Panorama> extract_adjacent_panoramas(rapidjson::Document& photometa_
 	auto& adjacent_list   = photometa_document[1][0][5][0][3][0];
 	for(auto& adjacent : adjacent_list.GetArray()) {
 		Panorama panorama = {
-			.id  = adjacent[0][1].GetString(),
-			.lat = adjacent[2][0][2].GetDouble(),
-			.lng = adjacent[2][0][3].GetDouble(),
+			.id    = adjacent[0][1].GetString(),
+			.lat   = adjacent[2][0][2].GetDouble(),
+			.lng   = adjacent[2][0][3].GetDouble(),
+			.yaw   = adjacent[2][2][0].GetDouble() * DEG_RAD,
+			.pitch = adjacent[2][2][1].GetDouble() * DEG_RAD,
+			.roll  = adjacent[2][2][2].GetDouble() * DEG_RAD,
 		};
 		if(panorama.id == current_panorama.id)
 			continue;

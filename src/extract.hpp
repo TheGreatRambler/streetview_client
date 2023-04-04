@@ -14,6 +14,9 @@ struct Location {
 struct Panorama {
 	double lat;
 	double lng;
+	double yaw;
+	double pitch;
+	double roll;
 	std::string id;
 };
 

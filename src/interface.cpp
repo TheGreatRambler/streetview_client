@@ -155,6 +155,8 @@ void InterfaceWindow::DrawFrame() {
 	glfwPollEvents();
 	frame++;
 
+	std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
 	// Start queueing
 	// QueueCloseAdjacent();
 	// fmt::print("FPS: {}\n", (double)frame
@@ -182,13 +184,15 @@ void InterfaceWindow::RenderPanorama() {
 		auto normalized_y
 			= (float)glfw_events.screen_offset_y / (float)surface->height() * 2.0f - 1.0f;
 		yaw   = normalized_x * PI * 0.5f;
-		pitch = normalized_y * PI * 0.33f + -PI * 0.65f;
-
-		// Calculate corrected yaw
-		corrected_yaw = std::fmod(std::fmod(yaw - PI, 2 * PI) + 2 * PI, 2 * PI);
+		pitch = normalized_y * PI * 0.33f;
 
 		// Set mouse rotation
-		shader_builder->uniform("u_rotation") = SkV2 { yaw, pitch };
+		// TODO fixing pitch is complicated
+		shader_builder->uniform("u_rotation") = SkV2 { yaw + (float)current_panorama.yaw,
+			pitch + (float)current_panorama.pitch - PI };
+
+		// Calculate corrected yaw
+		corrected_yaw = std::fmod(std::fmod(yaw - PI / 2, 2 * PI) + 2 * PI, 2 * PI);
 
 		// Correct FOV formula
 		// Vertical FOV = Initial FOV / Zoom
@@ -363,5 +367,5 @@ double InterfaceWindow::PanoramaClosenessHeuristic(Panorama& adjacent) {
 	return std::abs(angle - corrected_yaw)
 		   + std::sqrt(std::pow(adjacent.lat - current_panorama.lat, 2)
 					   + std::pow(adjacent.lng - current_panorama.lng, 2))
-				 * 3000.0;
+				 * 2500.0;
 }

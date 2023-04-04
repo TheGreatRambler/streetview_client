@@ -45,7 +45,8 @@ void PanoramaPreloader::PanoramaThread() {
 	CURL* curl_handle = curl_easy_init();
 
 	while(run_threads) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		std::this_thread::sleep_for(std::chrono::milliseconds(16));
+
 		queued_panoramas_m.lock();
 		if(queued_panoramas.empty()) {
 			queued_panoramas_m.unlock();

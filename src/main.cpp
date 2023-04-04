@@ -53,8 +53,9 @@ int main(int argc, char** argv) {
 	download_sub.add_option("--long", lng, "Longitude")->required();
 	int range = 10000;
 	download_sub.add_option("-r,--range", range, "Range from location");
-	int num_previews = 100;
-	download_sub.add_option("-n,--num-previews", num_previews, "Number of previews");
+	int num_panoramas = 100;
+	download_sub.add_option(
+		"-n,--num-panoramas", num_panoramas, "Number of panoramas to attempt to download");
 	int streetview_zoom = 2;
 	download_sub.add_option("-z,--zoom", streetview_zoom,
 		"How much to zoom in street view images, higher numbers "
@@ -77,7 +78,7 @@ int main(int argc, char** argv) {
 
 		auto client_id = download_client_id(curl_handle);
 		auto preview_document
-			= download_preview_document(curl_handle, client_id, num_previews, lat, lng, range);
+			= download_preview_document(curl_handle, client_id, num_panoramas, lat, lng, range);
 
 		stop = std::chrono::high_resolution_clock::now();
 		fmt::print("Setup took {}ms\n",
