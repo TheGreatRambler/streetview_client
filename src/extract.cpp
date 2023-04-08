@@ -29,6 +29,7 @@ Panorama extract_info(rapidjson::Document& photometa_document) {
 	auto& id             = photometa_document[1][0][1][1];
 	auto& lat_long       = photometa_document[1][0][5][0][1][0];
 	auto& yaw_pitch_roll = photometa_document[1][0][5][0][1][2];
+	auto& year_month     = photometa_document[1][0][6][7];
 	return Panorama {
 		.id    = id.GetString(),
 		.lat   = lat_long[2].GetDouble(),
@@ -36,21 +37,25 @@ Panorama extract_info(rapidjson::Document& photometa_document) {
 		.yaw   = yaw_pitch_roll[0].GetDouble() * DEG_RAD,
 		.pitch = yaw_pitch_roll[1].GetDouble() * DEG_RAD,
 		.roll  = yaw_pitch_roll[2].GetDouble() * DEG_RAD,
+		.month = year_month[1].GetInt(),
+		.year  = year_month[0].GetInt(),
 	};
 }
 
 Location extract_location(rapidjson::Document& photometa_document) {
 	Location location;
-	auto& outer_location = photometa_document[1][0][3][2];
-	if(outer_location.Size() == 1) {
-		// No address, just city
-		location.city_and_state = std::string(outer_location[0].GetString());
-	} else if(outer_location.Size() == 2) {
-		// Address and city
-		location.street         = std::string(outer_location[0].GetString());
-		location.city_and_state = std::string(outer_location[1].GetString());
+	// Can segfault
+	if(photometa_document[1][0][3].Size() > 2) {
+		auto& outer_location = photometa_document[1][0][3][2];
+		if(outer_location.Size() == 1) {
+			// No address, just city
+			location.city_and_state = std::string(outer_location[0].GetString());
+		} else if(outer_location.Size() == 2) {
+			// Address and city
+			location.street         = std::string(outer_location[0].GetString());
+			location.city_and_state = std::string(outer_location[1].GetString());
+		}
 	}
-
 	return location;
 }
 
@@ -80,4 +85,29 @@ std::pair<double, double> extract_tiles_dimensions(
 	double tiles_width     = tiles_dimensions[1].GetInt() / 512 / pow(2, 5 - streetview_zoom);
 	double tiles_height    = tiles_dimensions[0].GetInt() / 512 / pow(2, 5 - streetview_zoom);
 	return std::make_pair(tiles_width, tiles_height);
+}
+
+bool valid_photometa(rapidjson::Document& photometa_document) {
+	// For starters
+	return photometa_document.Size() > 0;
+}
+
+double center_distance(double lat, double lng, Panorama& panorama) {
+	return std::sqrt(std::pow(panorama.lat - lat, 2) + std::pow(panorama.lng - lng, 2));
+}
+
+int num_within_distance(double lat, double lng, double radius, std::vector<Panorama>& panoramas) {
+	int num = 0;
+	for(auto& panorama : panoramas) {
+		if(center_distance(lat, lng, panorama) <= radius) {
+			num++;
+		}
+	}
+	return num;
+}
+
+void sort_by_distance(double lat, double lng, std::vector<Panorama>& panoramas) {
+	std::sort(panoramas.begin(), panoramas.end(), [&](Panorama& a, Panorama& b) {
+		return center_distance(lat, lng, a) < center_distance(lat, lng, b);
+	});
 }

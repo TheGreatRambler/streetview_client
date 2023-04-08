@@ -109,8 +109,6 @@ sk_sp<SkImage> download_panorama(CURL* curl_handle, std::string panorama_id, int
 	sk_sp<SkSurface> tile_surface
 		= SkSurface::MakeRasterN32Premul(tiles_width * 512, tiles_height * 512);
 
-	fmt::print("Downloading {} tiles\n", tiles_width * tiles_height);
-
 	// Start processing
 	tile_surface->getCanvas()->clear(SK_ColorWHITE);
 	for(int y = 0; y < tiles_height; y++) {
@@ -142,4 +140,18 @@ sk_sp<SkImage> download_panorama(CURL* curl_handle, std::string panorama_id, int
 	}
 
 	return tile_surface->makeImageSnapshot();
+}
+
+std::vector<Panorama> get_infos(
+	CURL* curl_handle, std::string client_id, std::vector<std::string>& ids) {
+	std::vector<Panorama> infos;
+	for(auto& id : ids) {
+		// Get photometa
+		auto photometa_document = download_photometa(curl_handle, client_id, id);
+
+		// Get info
+		auto panorama_info = extract_info(photometa_document);
+		infos.push_back(panorama_info);
+	}
+	return infos;
 }

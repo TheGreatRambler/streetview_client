@@ -17,6 +17,8 @@ struct Panorama {
 	double yaw;
 	double pitch;
 	double roll;
+	int month = 0;
+	int year  = 0;
 	std::string id;
 };
 
@@ -26,3 +28,7 @@ Location extract_location(rapidjson::Document& photometa_document);
 std::vector<Panorama> extract_adjacent_panoramas(rapidjson::Document& photometa_document);
 std::pair<double, double> extract_tiles_dimensions(
 	rapidjson::Document& photometa_document, int streetview_zoom);
+bool valid_photometa(rapidjson::Document& photometa_document);
+double center_distance(double lat, double lng, Panorama& panorama);
+int num_within_distance(double lat, double lng, double radius, std::vector<Panorama>& panoramas);
+void sort_by_distance(double lat, double lng, std::vector<Panorama>& panoramas);
