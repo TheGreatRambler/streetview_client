@@ -1,5 +1,7 @@
 #include "download.hpp"
 
+#define MAPS_PREVIEW_ID "CAEIBAgFCAYgAQ"
+
 #include <core/SkData.h>
 #include <core/SkImage.h>
 #include <fmt/format.h>
@@ -69,7 +71,7 @@ rapidjson::Document download_preview_document(
 					"1s{}"
 					"!"
 					"7e81!15i11021!9m2!2d{}!3d{}!10d{}",
-			num_previews, "CAEIBAgFCAYgAQ", client_id, lng, lat, range),
+			num_previews, MAPS_PREVIEW_ID, client_id, lng, lat, range),
 		curl_handle, &res, NULL);
 
 	// Parse into JSON

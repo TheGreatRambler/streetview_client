@@ -1,6 +1,9 @@
 # Streetview Client
 A reverse engineered Google Maps streetview client in C++ that lets you download panoramas and render them.
 
+![Stationary viewer](./images/example.gif "Stationary viewer")
+![Navigate with arrow keys](./images/example2.gif "Navigate with arrow keys")
+
 # Usage
 ```
 Download panoramas
