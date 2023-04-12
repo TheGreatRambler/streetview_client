@@ -25,10 +25,17 @@
 
 #include "download.hpp"
 
-InterfaceWindow::InterfaceWindow(std::string initial_panorama_id, CURL* curl_handle) {
+InterfaceWindow::InterfaceWindow(std::string initial_panorama_id, int zoom, CURL* curl_handle,
+	int year_start, int year_end, int month_start, int month_end)
+	: year_start(year_start)
+	, year_end(year_end)
+	, month_start(month_start)
+	, month_end(month_end)
+	, client_id(client_id)
+	, curl_handle(curl_handle) {
 	// Start preloader
 	preloader.SetClientId(download_client_id(curl_handle));
-	preloader.SetZoom(1);
+	preloader.SetZoom(zoom);
 	preloader.SetCurlHandle(curl_handle);
 	preloader.Start(5);
 
@@ -167,7 +174,25 @@ void InterfaceWindow::DrawFrame() {
 void InterfaceWindow::ChangePanorama(std::string id) {
 	panorama_info    = preloader.GetPanorama(id, true);
 	current_panorama = extract_info(panorama_info->photometa);
-	adjacent         = extract_adjacent_panoramas(panorama_info->photometa);
+	fmt::print("Lat: {} Long: {}\n", current_panorama.lat, current_panorama.lng);
+	auto unfiltered_adjacent = extract_adjacent_panoramas(panorama_info->photometa);
+
+	// Filter adjacent to year and month range
+	adjacent.clear();
+	for(auto& panorama : unfiltered_adjacent) {
+		if(!is_date_specified(year_start, year_end, month_start, month_end)) {
+			// Just add it, much faster
+			adjacent.push_back(panorama);
+		} else {
+			// Have to download date
+			auto photometa_document = download_photometa(curl_handle, client_id, panorama.id);
+			panorama                = extract_info(photometa_document);
+			if(is_within_date(year_start, year_end, month_start, month_end, panorama)) {
+				adjacent.push_back(panorama);
+			}
+		}
+	}
+
 	PrepareShader();
 }
 
@@ -266,9 +291,9 @@ void InterfaceWindow::PrepareShader() {
 	const float PI_2 = 3.14159265358979323846264 * 0.5;
 
 	vec3 rotateXY(vec3 p, vec2 angle) {
-	    vec2 c = cos(angle), s = sin(angle);
-	    p = vec3(p.x, c.x*p.y + s.x*p.z, -s.x*p.y + c.x*p.z);
-	    return vec3(c.y*p.x + s.y*p.z, p.y, -s.y*p.x + c.y*p.z);
+		vec2 c = cos(angle), s = sin(angle);
+		p = vec3(p.x, c.x*p.y + s.x*p.z, -s.x*p.y + c.x*p.z);
+		return vec3(c.y*p.x + s.y*p.z, p.y, -s.y*p.x + c.y*p.z);
 	}
 
 	float4 main(float2 fragCoord) {

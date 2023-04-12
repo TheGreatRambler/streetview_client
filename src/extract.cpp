@@ -3,6 +3,7 @@
 #define _USE_MATH_DEFINES
 #define DEG_RAD 0.0174533
 
+#include <fmt/format.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/reader.h>
 #include <rapidjson/stringbuffer.h>
@@ -96,18 +97,38 @@ double center_distance(double lat, double lng, Panorama& panorama) {
 	return std::sqrt(std::pow(panorama.lat - lat, 2) + std::pow(panorama.lng - lng, 2));
 }
 
-int num_within_distance(double lat, double lng, double radius, std::vector<Panorama>& panoramas) {
+int num_within_distance_and_date(double lat, double lng, double radius, int year_start,
+	int year_end, int month_start, int month_end, std::vector<Panorama>& panoramas) {
 	int num = 0;
 	for(auto& panorama : panoramas) {
-		if(center_distance(lat, lng, panorama) <= radius) {
+		if(is_within_distance_and_date(
+			   lat, lng, radius, year_start, year_end, month_start, month_end, panorama)) {
 			num++;
 		}
 	}
 	return num;
 }
 
+bool is_within_distance_and_date(double lat, double lng, double radius, int year_start,
+	int year_end, int month_start, int month_end, Panorama& panorama) {
+	return center_distance(lat, lng, panorama) <= radius && panorama.month >= month_start
+		   && panorama.month <= month_end && panorama.year >= year_start
+		   && panorama.year <= year_end;
+}
+
+bool is_within_date(
+	int year_start, int year_end, int month_start, int month_end, Panorama& panorama) {
+	return panorama.month >= month_start && panorama.month <= month_end
+		   && panorama.year >= year_start && panorama.year <= year_end;
+	;
+}
+
 void sort_by_distance(double lat, double lng, std::vector<Panorama>& panoramas) {
 	std::sort(panoramas.begin(), panoramas.end(), [&](Panorama& a, Panorama& b) {
 		return center_distance(lat, lng, a) < center_distance(lat, lng, b);
 	});
+}
+
+bool is_date_specified(int year_start, int year_end, int month_start, int month_end) {
+	return !(year_start == -1 && year_end == 10000 && month_start == -1 && month_end == 10000);
 }

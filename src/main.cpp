@@ -54,41 +54,46 @@ int main(int argc, char** argv) {
 	double lng;
 	download_sub.add_option("--long", lng, "Longitude")->required();
 	int range = 10000;
-	download_sub.add_option("-r,--range", range, "Range from location");
-	int month_start = 1;
+	download_sub.add_option("-r,--range", range, "Range from location, unit not known");
+	int month_start = -1;
 	download_sub.add_option("--month-start", month_start, "Starting month");
-	int month_end = 12;
+	int month_end = 10000;
 	download_sub.add_option("--month-end", month_end, "Ending month (inclusive)");
-	int year_start = 0;
+	int year_start = -1;
 	download_sub.add_option("--year-start", year_start, "Starting year");
 	int year_end = 10000;
 	download_sub.add_option("--year-end", year_end, "Ending year (inclusive)");
 	std::string filepath_format = "tiles/{id}";
-	download_sub.add_option(
-		"--path-format", filepath_format, "Path format, not including the extension");
+	download_sub.add_option("--path-format", filepath_format,
+		"Path format, not including the extension. Supports {id}, {year}, {month}, {lat}, {long}, {street}, {city}");
 	int num_panoramas = 100;
 	download_sub.add_option(
 		"-n,--num-panoramas", num_panoramas, "Number of panoramas to attempt to download");
 	int streetview_zoom = 2;
 	download_sub.add_option("-z,--zoom", streetview_zoom,
-		"How much to zoom in street view images, higher numbers "
-		"increase resolution");
+		"Dimensions of street view images, higher numbers "
+		"increase resolution. Usually 1=832x416, 2=1664x832, 3=3328x1664, 4=6656x3328, 5=13312x6656 (glitched at the poles)");
 	bool include_json_info = false;
-	download_sub.add_flag(
-		"-j,--json", include_json_info, "Include JSON info alongside, used to render directories");
+	download_sub.add_flag("-j,--json", include_json_info, "Include JSON info alongside panorama");
 
-	auto& download_recursive_sub
-		= *download_sub.add_subcommand("recursive", "Recursively download");
+	auto& download_recursive_sub = *download_sub.add_subcommand(
+		"recursive", "Recursively attempt to download nearby panoramas");
 	int num_recursive_attempts = 10;
 	download_recursive_sub.add_option("-a,--num-attempts", num_recursive_attempts,
 		"Number of recursive attempts to download more images");
 	double recursive_radius = 10;
 	download_recursive_sub.add_option(
-		"-r,--radius", recursive_radius, "Number of recursive attempts to download more images");
+		"-r,--radius", recursive_radius, "Radius of images to download in latitude degrees");
 
-	auto& render_sub = *app.add_subcommand("render", "Render panoramas");
+	auto& render_sub = *app.add_subcommand("render", "Render panoramas in viewer");
 	std::string initial_id;
 	render_sub.add_option("-i,--id", initial_id, "Initial panorama ID")->required();
+	render_sub.add_option(
+		"-z,--zoom", streetview_zoom, "Dimensions of street view images, same as download -z");
+	render_sub.add_option("--month-start", month_start, "Starting month");
+	render_sub.add_option("--month-end", month_end, "Ending month (inclusive)");
+	render_sub.add_option("--year-start", year_start, "Starting year");
+	render_sub.add_option("--year-end", year_end, "Ending year (inclusive)");
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -130,6 +135,16 @@ int main(int argc, char** argv) {
 						}
 						auto adjacent = extract_adjacent_panoramas(photometa_document);
 
+						// Download photometa for each to get year and month, takes longer
+						// Only do this when year and/or month are specified
+						if(is_date_specified(year_start, year_end, month_start, month_end)) {
+							for(auto& panorama : adjacent) {
+								auto photometa_document
+									= download_photometa(curl_handle, client_id, panorama.id);
+								panorama = extract_info(photometa_document);
+							}
+						}
+
 						// Insert only the ones we don't already have
 						for(auto& info : adjacent) {
 							if(!already_have.count(info.id)) {
@@ -143,9 +158,10 @@ int main(int argc, char** argv) {
 
 						// Print the number of panoramas we have total and also the number within
 						// the radius we set
-						fmt::print("Number so far: {} Number within radius: {}\n",
+						fmt::print("Number so far: {} Number satisfying constraints: {}\n",
 							sorted_infos.size(),
-							num_within_distance(lat, lng, recursive_radius, sorted_infos));
+							num_within_distance_and_date(lat, lng, recursive_radius, year_start,
+								year_end, month_start, month_end, sorted_infos));
 
 						// Break out of this loop for another attempt
 						break;
@@ -159,16 +175,14 @@ int main(int argc, char** argv) {
 
 			// Download all the panoramas within the distance
 			for(auto& panorama : sorted_infos) {
-				if(center_distance(lat, lng, panorama) <= recursive_radius) {
+				if(is_within_distance_and_date(lat, lng, recursive_radius, year_start, year_end,
+					   month_start, month_end, panorama)) {
 					auto start = std::chrono::high_resolution_clock::now();
 
-					// Redownload the photometa, most images were adjacent and thus didn't have a
-					// photometa to begin with
+					// Obtain photometa for tiles dimensions
 					auto photometa_document
 						= download_photometa(curl_handle, client_id, panorama.id);
-
-					// Get info
-					auto panorama_info = extract_info(photometa_document);
+					panorama = extract_info(photometa_document);
 
 					// Get panorama
 					auto tile_surface = download_panorama(
@@ -177,10 +191,11 @@ int main(int argc, char** argv) {
 					// Location
 					auto location = extract_location(photometa_document);
 
-					std::string filename = fmt::format(fmt::runtime(filepath_format),
-						fmt::arg("id", panorama_info.id), fmt::arg("year", panorama_info.year),
-						fmt::arg("month", panorama_info.month), fmt::arg("lat", panorama_info.lat),
-						fmt::arg("long", panorama_info.lng));
+					std::string filename = fmt::format(fmt::runtime(filepath_format + ".png"),
+						fmt::arg("id", panorama.id), fmt::arg("year", panorama.year),
+						fmt::arg("month", panorama.month), fmt::arg("street", location.street),
+						fmt::arg("city", location.city_and_state), fmt::arg("lat", panorama.lat),
+						fmt::arg("long", panorama.lng));
 					std::filesystem::create_directories(
 						std::filesystem::path(filename).parent_path());
 
@@ -192,13 +207,13 @@ int main(int argc, char** argv) {
 					if(include_json_info) {
 						// Include JSON info alongside
 						rapidjson::Document infoJson(rapidjson::kObjectType);
-						infoJson.AddMember("id", panorama_info.id, infoJson.GetAllocator());
-						infoJson.AddMember("year", panorama_info.year, infoJson.GetAllocator());
-						infoJson.AddMember("month", panorama_info.month, infoJson.GetAllocator());
+						infoJson.AddMember("id", panorama.id, infoJson.GetAllocator());
+						infoJson.AddMember("year", panorama.year, infoJson.GetAllocator());
+						infoJson.AddMember("month", panorama.month, infoJson.GetAllocator());
 						infoJson.AddMember(
 							"location", location.city_and_state, infoJson.GetAllocator());
-						infoJson.AddMember("lat", panorama_info.lat, infoJson.GetAllocator());
-						infoJson.AddMember("long", panorama_info.lng, infoJson.GetAllocator());
+						infoJson.AddMember("lat", panorama.lat, infoJson.GetAllocator());
+						infoJson.AddMember("long", panorama.lng, infoJson.GetAllocator());
 
 						rapidjson::StringBuffer infoSb;
 						rapidjson::PrettyWriter<rapidjson::StringBuffer> infoWriter(infoSb);
@@ -244,8 +259,7 @@ int main(int argc, char** argv) {
 				auto panorama_info = extract_info(photometa_document);
 
 				// Check if it is within the range
-				if(panorama_info.month >= month_start && panorama_info.month <= month_end
-					&& panorama_info.year >= year_start && panorama_info.year <= year_end) {
+				if(is_within_date(year_start, year_end, month_start, month_end, panorama_info)) {
 					// Get panorama
 					auto tile_surface = download_panorama(
 						curl_handle, panorama_id, streetview_zoom, photometa_document);
@@ -255,8 +269,8 @@ int main(int argc, char** argv) {
 
 					std::string filename = fmt::format(fmt::runtime(filepath_format + ".png"),
 						fmt::arg("id", panorama_id), fmt::arg("year", panorama_info.year),
-						fmt::arg("month", panorama_info.month),
-						fmt::arg("location", location.city_and_state),
+						fmt::arg("month", panorama_info.month), fmt::arg("street", location.street),
+						fmt::arg("city", location.city_and_state),
 						fmt::arg("lat", panorama_info.lat), fmt::arg("long", panorama_info.lng));
 					std::filesystem::create_directories(
 						std::filesystem::path(filename).parent_path());
@@ -278,7 +292,8 @@ int main(int argc, char** argv) {
 		curl_global_cleanup();
 	} else if(render_sub) {
 		auto curl_handle = curl_easy_init();
-		InterfaceWindow window(initial_id, curl_handle);
+		InterfaceWindow window(
+			initial_id, streetview_zoom, curl_handle, year_start, year_end, month_start, month_end);
 		window.PrepareWindow();
 		while(!window.ShouldClose()) {
 			window.DrawFrame();

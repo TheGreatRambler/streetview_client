@@ -17,7 +17,8 @@
 
 class InterfaceWindow {
 public:
-	InterfaceWindow(std::string initial_panorama_id, CURL* curl_handle);
+	InterfaceWindow(std::string initial_panorama_id, int zoom, CURL* curl_handle, int year_start,
+		int year_end, int month_start, int month_end);
 
 	bool PrepareWindow();
 	void DrawFrame();
@@ -67,6 +68,12 @@ private:
 	const int map_width    = 800;
 	const int map_height   = 800;
 	const double map_scale = 500000.0;
+
+	int year_start;
+	int year_end;
+	int month_start;
+	int month_end;
+	std::string client_id;
 
 	// Panorama variables
 	CURL* curl_handle;
