@@ -45,7 +45,7 @@ elseif(WIN32)
 else()
 	# MacOS
 	execute_process(
-		COMMAND bin/gn gen ${SKIA_BUILD_DIR} "--args=target_cpu=\"arm64\" is_official_build=true skia_use_system_libjpeg_turbo=false skia_use_system_libwebp=false skia_use_system_expat=false skia_use_system_zlib=false skia_use_system_libpng=false skia_use_system_harfbuzz=false skia_use_system_icu=false skia_enable_gpu=true skia_use_gl=true"
+		COMMAND bin/gn gen ${SKIA_BUILD_DIR} "--args=is_official_build=true skia_use_system_libjpeg_turbo=false skia_use_system_libwebp=false skia_use_system_expat=false skia_use_system_zlib=false skia_use_system_libpng=false skia_use_system_harfbuzz=false skia_use_system_icu=false skia_enable_gpu=true skia_use_gl=true"
 		WORKING_DIRECTORY ${SKIA_DIR})
 	add_library(skia STATIC IMPORTED)
 	set_property(TARGET skia PROPERTY
@@ -54,6 +54,7 @@ endif()
 execute_process(COMMAND ninja WORKING_DIRECTORY ${SKIA_BUILD_DIR})
 
 # For OpenGL
+set(GLFW_LIBRARY_TYPE "STATIC")
 find_package(glfw3 3.3 REQUIRED)
 
 add_executable(streetview_client ${APPLICATION_TYPE}
