@@ -10,6 +10,7 @@
 [submodule "third_party/skia"]
 	path = third_party/skia
 	url = https://github.com/google/skia
+	shallow = true
 [submodule "third_party/rapidjson"]
 	path = third_party/rapidjson
 	url = https://github.com/Tencent/rapidjson
