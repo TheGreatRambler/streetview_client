@@ -38,6 +38,9 @@ set(SKIA_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/third_party/skia)
 execute_process(
 	COMMAND python tools/git-sync-deps
 	WORKING_DIRECTORY ${SKIA_DIR})
+execute_process(
+	COMMAND python bin/fetch-gn
+	WORKING_DIRECTORY ${SKIA_DIR})
 if(ANDROID)
 	
 elseif(WIN32)

@@ -24,6 +24,7 @@ Options:
   -n,--num-panoramas INT      Number of panoramas to attempt to download
   -z,--zoom INT               Dimensions of street view images, higher numbers increase resolution. Usually 1=832x416, 2=1664x832, 3=3328x1664, 4=6656x3328, 5=13312x6656 (glitched at the poles)
   -j,--json                   Include JSON info alongside panorama
+  --only-json                 Only include JSON info alongside panorama
 
 Subcommands:
   recursive                   Recursively attempt to download nearby panoramas

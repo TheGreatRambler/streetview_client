@@ -75,6 +75,9 @@ int main(int argc, char** argv) {
 		"increase resolution. Usually 1=832x416, 2=1664x832, 3=3328x1664, 4=6656x3328, 5=13312x6656 (glitched at the poles)");
 	bool include_json_info = false;
 	download_sub.add_flag("-j,--json", include_json_info, "Include JSON info alongside panorama");
+	bool only_include_json_info = false;
+	download_sub.add_flag(
+		"--only-json", only_include_json_info, "Only include JSON info alongside panorama");
 
 	auto& download_recursive_sub = *download_sub.add_subcommand(
 		"recursive", "Recursively attempt to download nearby panoramas");
@@ -179,14 +182,13 @@ int main(int argc, char** argv) {
 					   month_start, month_end, panorama)) {
 					auto start = std::chrono::high_resolution_clock::now();
 
-					// Obtain photometa for tiles dimensions
+					// Obtain photometa for tiles dimensions and date
 					auto photometa_document
 						= download_photometa(curl_handle, client_id, panorama.id);
+					if(!valid_photometa(photometa_document)) {
+						continue;
+					}
 					panorama = extract_info(photometa_document);
-
-					// Get panorama
-					auto tile_surface = download_panorama(
-						curl_handle, panorama.id, streetview_zoom, photometa_document);
 
 					// Location
 					auto location = extract_location(photometa_document);
@@ -199,12 +201,18 @@ int main(int argc, char** argv) {
 					std::filesystem::create_directories(
 						std::filesystem::path(filename).parent_path());
 
-					auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
-					std::ofstream outfile(filename + ".png", std::ios::out | std::ios::binary);
-					outfile.write((const char*)tile_data->bytes(), tile_data->size());
-					outfile.close();
+					if(!only_include_json_info) {
+						// Get panorama image
+						auto tile_surface = download_panorama(
+							curl_handle, panorama.id, streetview_zoom, photometa_document);
 
-					if(include_json_info) {
+						auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
+						std::ofstream outfile(filename + ".png", std::ios::out | std::ios::binary);
+						outfile.write((const char*)tile_data->bytes(), tile_data->size());
+						outfile.close();
+					}
+
+					if(include_json_info || only_include_json_info) {
 						// Include JSON info alongside
 						rapidjson::Document infoJson(rapidjson::kObjectType);
 						infoJson.AddMember("id", panorama.id, infoJson.GetAllocator());
