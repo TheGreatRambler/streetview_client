@@ -1,12 +1,15 @@
 [submodule "third_party/fmt"]
 	path = third_party/fmt
 	url = https://github.com/fmtlib/fmt
+	shallow = true
 [submodule "third_party/curl"]
 	path = third_party/curl
 	url = https://github.com/curl/curl
+	shallow = true
 [submodule "third_party/CLI11"]
 	path = third_party/CLI11
 	url = https://github.com/CLIUtils/CLI11
+	shallow = true
 [submodule "third_party/skia"]
 	path = third_party/skia
 	url = https://github.com/google/skia
@@ -14,3 +17,4 @@
 [submodule "third_party/rapidjson"]
 	path = third_party/rapidjson
 	url = https://github.com/Tencent/rapidjson
+	shallow = true

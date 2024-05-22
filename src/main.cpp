@@ -264,10 +264,10 @@ int main(int argc, char** argv) {
 				auto photometa_document = download_photometa(curl_handle, client_id, panorama_id);
 
 				// Get info
-				auto panorama_info = extract_info(photometa_document);
+				auto panorama = extract_info(photometa_document);
 
 				// Check if it is within the range
-				if(is_within_date(year_start, year_end, month_start, month_end, panorama_info)) {
+				if(is_within_date(year_start, year_end, month_start, month_end, panorama)) {
 					// Get panorama
 					auto tile_surface = download_panorama(
 						curl_handle, panorama_id, streetview_zoom, photometa_document);
@@ -275,18 +275,42 @@ int main(int argc, char** argv) {
 					// Location
 					auto location = extract_location(photometa_document);
 
-					std::string filename = fmt::format(fmt::runtime(filepath_format + ".png"),
-						fmt::arg("id", panorama_id), fmt::arg("year", panorama_info.year),
-						fmt::arg("month", panorama_info.month), fmt::arg("street", location.street),
-						fmt::arg("city", location.city_and_state),
-						fmt::arg("lat", panorama_info.lat), fmt::arg("long", panorama_info.lng));
+					std::string filename = fmt::format(fmt::runtime(filepath_format),
+						fmt::arg("id", panorama_id), fmt::arg("year", panorama.year),
+						fmt::arg("month", panorama.month), fmt::arg("street", location.street),
+						fmt::arg("city", location.city_and_state), fmt::arg("lat", panorama.lat),
+						fmt::arg("long", panorama.lng));
 					std::filesystem::create_directories(
 						std::filesystem::path(filename).parent_path());
 
-					auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
-					std::ofstream outfile(filename, std::ios::out | std::ios::binary);
-					outfile.write((const char*)tile_data->bytes(), tile_data->size());
-					outfile.close();
+					if(!only_include_json_info) {
+						auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
+						std::ofstream outfile(filename + ".png", std::ios::out | std::ios::binary);
+						outfile.write((const char*)tile_data->bytes(), tile_data->size());
+						outfile.close();
+					}
+
+					if(include_json_info || only_include_json_info) {
+						// Include JSON info alongside
+						rapidjson::Document infoJson(rapidjson::kObjectType);
+						infoJson.AddMember("id", panorama_id, infoJson.GetAllocator());
+						infoJson.AddMember("year", panorama.year, infoJson.GetAllocator());
+						infoJson.AddMember("month", panorama.month, infoJson.GetAllocator());
+						infoJson.AddMember(
+							"location", location.city_and_state, infoJson.GetAllocator());
+						infoJson.AddMember("lat", panorama.lat, infoJson.GetAllocator());
+						infoJson.AddMember("long", panorama.lng, infoJson.GetAllocator());
+
+						rapidjson::StringBuffer infoSb;
+						rapidjson::PrettyWriter<rapidjson::StringBuffer> infoWriter(infoSb);
+						infoWriter.SetIndent('\t', 1);
+						infoJson.Accept(infoWriter);
+
+						// Write to filesystem at the same location the panorama is
+						std::ofstream infoFile(filename + ".json", std::ios::out);
+						infoFile.write(infoSb.GetString(), infoSb.GetLength());
+						infoFile.close();
+					}
 
 					stop = std::chrono::high_resolution_clock::now();
 					fmt::print("Downloading {} took {}ms\n", panorama_id,

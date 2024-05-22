@@ -71,7 +71,7 @@ add_executable(streetview_client ${APPLICATION_TYPE}
 )
 
 set_target_properties(streetview_client PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_options(streetview_client PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-braces)
+target_compile_options(streetview_client PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-braces -Wno-sign-conversion -Wno-deprecated-copy-with-user-provided-copy)
 
 set_target_properties(streetview_client PROPERTIES
 		OUTPUT_NAME "streetview_client"

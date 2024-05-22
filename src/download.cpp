@@ -32,7 +32,7 @@ std::string download_from_url(
 	// added options that may be required
 	curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // redirects
 	curl_easy_setopt(curl_handle, CURLOPT_HTTPPROXYTUNNEL,
-		1L);                                                   // corp. proxies etc.
+		1L); // corp. proxies etc.
 	// curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L); // we want it all
 	//  curl_easy_setopt(curl_handle, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP |
 	//  CURLPROTO_HTTPS);
@@ -58,19 +58,19 @@ rapidjson::Document download_preview_document(
 	CURL* curl_handle, std::string client_id, int num_previews, double lat, double lng, int range) {
 	CURLcode res;
 	auto photo_preview_download = download_from_url(
-		fmt::format("https://www.google.com/maps/preview/"
-					"photo?authuser=0&hl=en&gl=us&pb=!1e3!5m54!2m2!1i203!2i100!3m3!2i{}"
-					"!"
-					"3s{}!5b1!7m42!1m3!1e1!2b0!3e3!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!"
-					"1e8!"
-					"2b0!3e3!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e9!2b1!3e2!1m3!"
-					"1e10!"
-					"2b0!"
-					"3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e4!2b1!4b1!8m0!9b0!11m1!4b1!"
-					"6m3!"
-					"1s{}"
-					"!"
-					"7e81!15i11021!9m2!2d{}!3d{}!10d{}",
+		fmt::format(
+			"https://www.google.com/maps/rpc/photo/listentityphotos?authuser=0&hl=en&gl=us&pb=!1e3!5m54!2m2!1i203!2i100!3m3!2i{}"
+			"!"
+			"3s{}!5b1!7m42!1m3!1e1!2b0!3e3!1m3!1e2!2b1!3e2!1m3!1e2!2b0!3e3!1m3!"
+			"1e8!"
+			"2b0!3e3!1m3!1e10!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e9!2b1!3e2!1m3!"
+			"1e10!"
+			"2b0!"
+			"3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e4!2b1!4b1!8m0!9b0!11m1!4b1!"
+			"6m3!"
+			"1s{}"
+			"!"
+			"7e81!15i11021!9m2!2d{}!3d{}!10d{}",
 			num_previews, MAPS_PREVIEW_ID, client_id, lng, lat, range),
 		curl_handle, &res, NULL);
 
@@ -118,9 +118,9 @@ sk_sp<SkImage> download_panorama(CURL* curl_handle, std::string panorama_id, int
 			// Download the specific tile
 			// Each tile takes around ~40ms to download
 			CURLcode res;
-			auto tile_url = fmt::format("https://streetviewpixels-pa.googleapis.com/v1/"
-										"tile?cb_client=maps_sv.tactile&panoid={}&x={}&"
-										"y={}&zoom={}&nbt=1&fover=2",
+			auto tile_url = fmt::format(
+				"https://streetviewpixels-pa.googleapis.com/v1/tile?cb_client=maps_sv.tactile&panoid={}&x={}&"
+				"y={}&zoom={}&nbt=1&fover=2",
 				panorama_id, x, y, streetview_zoom);
 			auto tile_download
 				= download_from_url(tile_url, curl_handle, &res, get_panorama_headers());
