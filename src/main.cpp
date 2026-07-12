@@ -49,10 +49,12 @@ int main(int argc, char** argv) {
 	app.require_subcommand(1, 1);
 
 	auto& download_sub = *app.add_subcommand("download", "Download panoramas");
+	std::string download_id;
+	download_sub.add_option("-i,--id", download_id, "Panorama ID to download directly");
 	double lat;
-	download_sub.add_option("--lat", lat, "Latitude")->required();
+	download_sub.add_option("--lat", lat, "Latitude");
 	double lng;
-	download_sub.add_option("--long", lng, "Longitude")->required();
+	download_sub.add_option("--long", lng, "Longitude");
 	int range = 10000;
 	download_sub.add_option("-r,--range", range, "Range from location, unit not known");
 	int month_start = -1;
@@ -100,11 +102,70 @@ int main(int argc, char** argv) {
 
 	CLI11_PARSE(app, argc, argv);
 
+	if(download_sub && download_id.empty()
+		&& (!download_sub.count("--lat") || !download_sub.count("--long"))) {
+		fmt::print(stderr, "error: must provide either -i,--id or both --lat and --long\n");
+		return 1;
+	}
+
 	curl_global_init(CURL_GLOBAL_ALL);
 	if(download_sub) {
 		auto curl_handle = curl_easy_init();
 
-		if(download_recursive_sub) {
+		if(!download_id.empty()) {
+			auto client_id = download_client_id(curl_handle);
+
+			auto start = std::chrono::high_resolution_clock::now();
+
+			auto photometa_document = download_photometa(curl_handle, client_id, download_id);
+			if(!valid_photometa(photometa_document)) {
+				fmt::print(stderr, "error: invalid photometa for id {}\n", download_id);
+				curl_easy_cleanup(curl_handle);
+				curl_global_cleanup();
+				return 1;
+			}
+			auto panorama = extract_info(photometa_document);
+			auto location = extract_location(photometa_document);
+
+			std::string filename = fmt::format(fmt::runtime(filepath_format),
+				fmt::arg("id", download_id), fmt::arg("year", panorama.year),
+				fmt::arg("month", panorama.month), fmt::arg("street", location.street),
+				fmt::arg("city", location.city_and_state), fmt::arg("lat", panorama.lat),
+				fmt::arg("long", panorama.lng));
+			std::filesystem::create_directories(std::filesystem::path(filename).parent_path());
+
+			if(!only_include_json_info) {
+				auto tile_surface = download_panorama(
+					curl_handle, download_id, streetview_zoom, photometa_document);
+				auto tile_data = tile_surface->encodeToData(SkEncodedImageFormat::kPNG, 95);
+				std::ofstream outfile(filename + ".png", std::ios::out | std::ios::binary);
+				outfile.write((const char*)tile_data->bytes(), tile_data->size());
+				outfile.close();
+			}
+
+			if(include_json_info || only_include_json_info) {
+				rapidjson::Document infoJson(rapidjson::kObjectType);
+				infoJson.AddMember("id", download_id, infoJson.GetAllocator());
+				infoJson.AddMember("year", panorama.year, infoJson.GetAllocator());
+				infoJson.AddMember("month", panorama.month, infoJson.GetAllocator());
+				infoJson.AddMember("location", location.city_and_state, infoJson.GetAllocator());
+				infoJson.AddMember("lat", panorama.lat, infoJson.GetAllocator());
+				infoJson.AddMember("long", panorama.lng, infoJson.GetAllocator());
+
+				rapidjson::StringBuffer infoSb;
+				rapidjson::PrettyWriter<rapidjson::StringBuffer> infoWriter(infoSb);
+				infoWriter.SetIndent('\t', 1);
+				infoJson.Accept(infoWriter);
+
+				std::ofstream infoFile(filename + ".json", std::ios::out);
+				infoFile.write(infoSb.GetString(), infoSb.GetLength());
+				infoFile.close();
+			}
+
+			auto stop = std::chrono::high_resolution_clock::now();
+			fmt::print("Downloading {} took {}ms\n", download_id,
+				std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count());
+		} else if(download_recursive_sub) {
 			auto start = std::chrono::high_resolution_clock::now();
 
 			auto client_id = download_client_id(curl_handle);

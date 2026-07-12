@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.5)
 set(STREETVIEW_CLIENT_VERSION "0.0.1")
 project(streetview_client VERSION ${STREETVIEW_CLIENT_VERSION})
 
@@ -27,8 +27,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/CLI11 ${CMAKE_CURRENT_B
 
 # Rapidjson for some endpoints
 set(RAPIDJSON_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson/include)
-set(RAPIDJSON_BUILD_EXAMPLES OFF)
-set(RAPIDJSON_BUILD_TESTS OFF)
+set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidjson ${CMAKE_CURRENT_BINARY_DIR}/third_party/rapidjson)
 string(REPLACE "-march=native" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
